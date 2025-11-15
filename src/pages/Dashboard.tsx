@@ -1,11 +1,13 @@
 import React from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { useSession } from '@/integrations/supabase/SessionContextProvider';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Outlet } from 'react-router-dom';
 import { useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 import { showSuccess, showError } from '@/utils/toast';
+import ProjectList from '@/components/projects/ProjectList';
+import { PlusCircle } from 'lucide-react';
 
 const Dashboard = () => {
   const { session, isLoading } = useSession();
@@ -35,24 +37,21 @@ const Dashboard = () => {
     <DashboardLayout
       sidebar={
         <div className="space-y-4">
-          <h2 className="text-xl font-semibold text-sidebar-foreground">Roadmap</h2>
-          <p className="text-sidebar-foreground/80">Phase 1: Discovery</p>
-          <p className="text-sidebar-foreground/80">Phase 2: Strategy</p>
-          {/* More phases will go here */}
-          <Button onClick={handleLogout} variant="destructive" className="w-full">
-            Logout
+          <h2 className="text-xl font-semibold text-sidebar-foreground">Your Projects</h2>
+          <Button onClick={() => navigate('/project/new')} className="w-full" variant="outline">
+            <PlusCircle className="mr-2 h-4 w-4" /> Create New Project
           </Button>
+          <ProjectList />
+          <div className="pt-4 border-t border-sidebar-border">
+            <Button onClick={handleLogout} variant="destructive" className="w-full">
+              Logout
+            </Button>
+          </div>
         </div>
       }
       mainContent={
-        <div className="flex flex-col items-center justify-center h-full">
-          <h1 className="text-3xl font-bold mb-4">Welcome to your Dashboard!</h1>
-          <p className="text-lg text-muted-foreground">
-            Select a project or create a new one to get started.
-          </p>
-          <Button onClick={() => navigate('/project/new')} className="mt-4">
-            Create New Project
-          </Button>
+        <div className="h-full">
+          <Outlet /> {/* Renders nested routes like ProjectDetails */}
         </div>
       }
       aiPanel={
