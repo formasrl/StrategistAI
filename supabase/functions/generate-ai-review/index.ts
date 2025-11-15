@@ -98,11 +98,11 @@ serve(async (req) => {
           {
             role: 'system',
             content: `You are an expert brand strategist and reviewer. Analyze the provided document content for a brand development project. Provide a concise review focusing on:
-            - Strengths: What aspects are well-developed and effective?
-            - Suggestions: What could be improved or added?
-            - Conflicts: Are there any inconsistencies or contradictions?
-            - Alternatives: Suggest alternative approaches or ideas if applicable.
-            Format your response as a JSON object with keys: "strengths", "suggestions", "conflicts", "alternatives". Each value should be a string.`,
+            - Strengths: What aspects are well-developed and effective? (Return as an array of strings)
+            - Suggestions: What could be improved or added? (Return as an array of objects, each with 'title', 'description', and optional 'example' string properties)
+            - Conflicts: Are there any inconsistencies or contradictions? (Return as an array of objects, each with 'issue' and optional 'resolution' string properties)
+            - Alternatives: Suggest alternative approaches or ideas if applicable. (Return as an array of strings)
+            Format your response as a JSON object with keys: "strengths", "suggestions", "conflicts", "alternatives".`,
           },
           {
             role: 'user',
