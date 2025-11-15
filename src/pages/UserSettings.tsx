@@ -19,7 +19,7 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
-  FormDescription, // <--- ADDED THIS IMPORT
+  FormDescription,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -59,9 +59,9 @@ const UserSettings: React.FC = () => {
         .from('user_settings')
         .select('*')
         .eq('user_id', user.id)
-        .single();
+        .maybeSingle(); // Changed to maybeSingle()
 
-      if (error && error.code !== 'PGRST116') { // PGRST116 means no rows found
+      if (error) { // Removed the PGRST116 check as maybeSingle handles no rows gracefully
         showError(`Failed to load settings: ${error.message}`);
       } else if (data) {
         form.reset({
@@ -104,7 +104,6 @@ const UserSettings: React.FC = () => {
     }
   };
 
-  // Temporary debug output
   if (isSessionLoading || isLoadingSettings) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-white">
@@ -135,7 +134,7 @@ const UserSettings: React.FC = () => {
                         onCheckedChange={field.onChange}
                       />
                     </FormControl>
-                    <FormDescription> {/* <--- FormDescription is now defined */}
+                    <FormDescription>
                       Toggle AI assistance on or off for your projects.
                     </FormDescription>
                   </div>
@@ -155,7 +154,7 @@ const UserSettings: React.FC = () => {
                       {...field}
                     />
                   </FormControl>
-                  <FormDescription> {/* <--- FormDescription is now defined */}
+                  <FormDescription>
                     Provide your OpenAI API key to enable advanced AI features. This is stored securely.
                   </FormDescription>
                   <FormMessage />
@@ -180,7 +179,7 @@ const UserSettings: React.FC = () => {
                       <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo</SelectItem>
                     </SelectContent>
                   </Select>
-                  <FormDescription> {/* <--- FormDescription is now defined */}
+                  <FormDescription>
                     Choose the OpenAI model you'd like to use for AI assistance.
                   </FormDescription>
                   <FormMessage />
