@@ -1,4 +1,9 @@
 import React from 'react';
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable";
 
 interface DashboardLayoutProps {
   sidebar: React.ReactNode;
@@ -8,22 +13,33 @@ interface DashboardLayoutProps {
 
 const DashboardLayout: React.FC<DashboardLayoutProps> = ({ sidebar, mainContent, aiPanel }) => {
   return (
-    <div className="flex min-h-screen bg-background text-foreground">
+    <ResizablePanelGroup
+      direction="horizontal"
+      className="min-h-screen w-full rounded-lg border bg-background text-foreground"
+    >
       {/* Left Sidebar (Roadmap Navigation) */}
-      <aside className="w-[20%] border-r border-border bg-sidebar p-4 hidden md:block">
-        {sidebar}
-      </aside>
+      <ResizablePanel defaultSize={20} minSize={15} maxSize={30} className="hidden md:block">
+        <aside className="h-full p-4 bg-sidebar border-r border-border">
+          {sidebar}
+        </aside>
+      </ResizablePanel>
+      <ResizableHandle withHandle className="hidden md:flex" />
 
       {/* Center Content (Document Editor) */}
-      <main className="flex-1 w-[60%] p-4">
-        {mainContent}
-      </main>
+      <ResizablePanel defaultSize={60} minSize={40}>
+        <main className="h-full p-4">
+          {mainContent}
+        </main>
+      </ResizablePanel>
+      <ResizableHandle withHandle className="hidden md:flex" />
 
       {/* Right Sidebar (AI Panel) */}
-      <aside className="w-[20%] border-l border-border bg-sidebar p-4 hidden md:block">
-        {aiPanel}
-      </aside>
-    </div>
+      <ResizablePanel defaultSize={20} minSize={15} maxSize={30} className="hidden md:block">
+        <aside className="h-full p-4 bg-sidebar border-l border-border">
+          {aiPanel}
+        </aside>
+      </ResizablePanel>
+    </ResizablePanelGroup>
   );
 };
 
