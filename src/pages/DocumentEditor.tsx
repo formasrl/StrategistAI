@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useOutletContext } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Document, AiReview } from '@/types/supabase';
@@ -7,8 +7,9 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
-import { Save, Brain, Loader2 } from 'lucide-react';
-import AiReviewDisplay from '@/components/ai/AiReviewDisplay'; // New import
+import { Save, Brain, Loader2, History, RotateCcw } from 'lucide-react';
+import AiReviewDisplay from '@/components/ai/AiReviewDisplay';
+import DocumentVersionList from '@/components/documents/DocumentVersionList'; // New import
 
 interface DocumentEditorOutletContext {
   setAiReview: (review: AiReview | null) => void;
@@ -25,6 +26,10 @@ const DocumentEditor: React.FC = () => {
   const [isLoadingAiReview, setIsLoadingAiReviewState] = useState(false);
   const { setAiReview, setIsAiReviewLoading } = useOutletContext<DocumentEditorOutletContext>();
 
+  // State for viewing historical versions
+  const [viewingVersionContent, setViewingVersionContent] = useState<string | null>(null);
+  const [viewingVersionNumber, setViewingVersionNumber] = useState<number | null>(null);
+
   // Sync AI review state with DashboardLayout context
   useEffect(() => {
     setAiReview(aiReview);
@@ -34,8 +39,7 @@ const DocumentEditor: React.FC = () => {
     setIsAiReviewLoading(isLoadingAiReview);
   }, [isLoadingAiReview, setIsAiReviewLoading]);
 
-
-  const fetchDocumentAndReview = async () => {
+  const fetchDocumentAndReview = useCallback(async () => {
     if (!documentId) {
       setIsLoadingDocument(false);
       return;
@@ -53,17 +57,22 @@ const DocumentEditor: React.FC = () => {
       setDocument(null);
       setContent('');
       setAiReviewState(null);
+      setViewingVersionContent(null);
+      setViewingVersionNumber(null);
     } else {
       setDocument(data);
       setContent(data?.content || '');
+      setViewingVersionContent(null); // Reset viewing historical content
+      setViewingVersionNumber(data?.current_version || null);
+
       // Fetch latest AI review for this document
       const { data: reviewData, error: reviewError } = await supabase
         .from('ai_reviews')
         .select('*')
         .eq('document_id', documentId)
-        .order('created_at', { ascending: false })
+        .order('review_timestamp', { ascending: false }) // Use review_timestamp
         .limit(1)
-        .single();
+        .maybeSingle();
 
       if (reviewError && reviewError.code !== 'PGRST116') { // PGRST116 means no rows found
         console.error('Error fetching AI review:', reviewError);
@@ -75,47 +84,90 @@ const DocumentEditor: React.FC = () => {
       }
     }
     setIsLoadingDocument(false);
-  };
+  }, [documentId]);
 
   useEffect(() => {
     fetchDocumentAndReview();
-  }, [documentId]);
+  }, [fetchDocumentAndReview]);
 
   const handleSave = async () => {
     if (!document || isSaving) return;
 
     setIsSaving(true);
-    const { error } = await supabase
-      .from('documents')
-      .update({ content: content, updated_at: new Date().toISOString() })
-      .eq('id', document.id);
+    try {
+      const newVersionNumber = (document.current_version || 0) + 1;
 
-    if (error) {
-      showError(`Failed to save document: ${error.message}`);
-    } else {
-      showSuccess('Document saved successfully!');
-      setDocument((prev) => prev ? { ...prev, content: content } : null);
+      // 1. Insert new version into document_versions
+      const { error: versionError } = await supabase.from('document_versions').insert({
+        document_id: document.id,
+        content: content,
+        version: newVersionNumber,
+        change_description: `Saved version ${newVersionNumber}`, // Can be enhanced with user input
+      });
+
+      if (versionError) {
+        throw new Error(`Failed to create document version: ${versionError.message}`);
+      }
+
+      // 2. Update the main document with the new content and version
+      const { error: documentUpdateError } = await supabase
+        .from('documents')
+        .update({
+          content: content,
+          current_version: newVersionNumber,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', document.id);
+
+      if (documentUpdateError) {
+        throw new Error(`Failed to update document: ${documentUpdateError.message}`);
+      }
+
+      showSuccess('Document saved and new version created successfully!');
+      setDocument((prev) => prev ? { ...prev, content: content, current_version: newVersionNumber } : null);
+      setViewingVersionContent(null); // Ensure we're viewing the latest after save
+      setViewingVersionNumber(newVersionNumber);
+    } catch (error: any) {
+      showError(`Save failed: ${error.message}`);
+    } finally {
+      setIsSaving(false);
     }
-    setIsSaving(false);
   };
 
   const handleGenerateAiReview = async () => {
     if (!document || isLoadingAiReview) return;
 
     setIsAiReviewState(true);
-    const { data, error } = await supabase.functions.invoke('generate-ai-review', {
-      body: { documentId: document.id },
-    });
+    try {
+      const { data, error } = await supabase.functions.invoke('generate-ai-review', {
+        body: { documentId: document.id },
+      });
 
-    if (error) {
-      showError(`AI review failed: ${error.message}`);
-      setAiReviewState(null);
-    } else {
+      if (error) {
+        throw new Error(error.message);
+      }
+
       showSuccess('AI review generated successfully!');
       // Refetch the latest review from the database to ensure consistency
       await fetchDocumentAndReview();
+    } catch (error: any) {
+      showError(`AI review failed: ${error.message}`);
+      setAiReviewState(null);
+    } finally {
+      setIsAiReviewState(false);
     }
-    setIsAiReviewState(false);
+  };
+
+  const handleViewHistoricalVersion = (versionContent: string, versionNumber: number) => {
+    setViewingVersionContent(versionContent);
+    setViewingVersionNumber(versionNumber);
+    showSuccess(`Viewing historical version ${versionNumber}.`);
+  };
+
+  const handleBackToLatest = () => {
+    setViewingVersionContent(null);
+    setViewingVersionNumber(document?.current_version || null);
+    showSuccess('Switched back to the latest document version.');
   };
 
   if (isLoadingDocument) {
@@ -141,36 +193,53 @@ const DocumentEditor: React.FC = () => {
   }
 
   return (
-    <Card className="w-full h-full flex flex-col">
-      <CardHeader className="flex flex-row items-center justify-between">
-        <div>
-          <CardTitle className="text-2xl font-bold">{document.document_name}</CardTitle>
-          <CardDescription className="text-muted-foreground">
-            Status: {document.status} | Version: {document.current_version}
-          </CardDescription>
-        </div>
-        <div className="flex gap-2">
-          <Button onClick={handleGenerateAiReview} disabled={isLoadingAiReview}>
-            {isLoadingAiReview ? (
-              <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating...</>
-            ) : (
-              <><Brain className="mr-2 h-4 w-4" /> Generate AI Review</>
+    <div className="flex flex-col h-full space-y-4">
+      <Card className="w-full flex-1 flex flex-col">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle className="text-2xl font-bold">{document.document_name}</CardTitle>
+            <CardDescription className="text-muted-foreground">
+              Status: {document.status} | Version: {viewingVersionNumber}
+              {viewingVersionContent && <span className="ml-2 text-yellow-600 dark:text-yellow-400">(Historical View)</span>}
+            </CardDescription>
+          </div>
+          <div className="flex gap-2">
+            {viewingVersionContent && (
+              <Button onClick={handleBackToLatest} variant="outline">
+                <RotateCcw className="mr-2 h-4 w-4" /> Back to Latest
+              </Button>
             )}
-          </Button>
-          <Button onClick={handleSave} disabled={isSaving}>
-            {isSaving ? 'Saving...' : <><Save className="mr-2 h-4 w-4" /> Save Document</>}
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent className="flex-1 flex flex-col p-6 pt-0">
-        <Textarea
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          placeholder="Start writing your document here..."
-          className="flex-1 min-h-[300px] resize-none"
+            <Button onClick={handleGenerateAiReview} disabled={isLoadingAiReview || !!viewingVersionContent}>
+              {isLoadingAiReview ? (
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating...</>
+              ) : (
+                <><Brain className="mr-2 h-4 w-4" /> Generate AI Review</>
+              )}
+            </Button>
+            <Button onClick={handleSave} disabled={isSaving || !!viewingVersionContent}>
+              {isSaving ? 'Saving...' : <><Save className="mr-2 h-4 w-4" /> Save Document</>}
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="flex-1 flex flex-col p-6 pt-0">
+          <Textarea
+            value={viewingVersionContent !== null ? viewingVersionContent : content}
+            onChange={(e) => setContent(e.target.value)}
+            placeholder="Start writing your document here..."
+            className="flex-1 min-h-[300px] resize-none"
+            readOnly={!!viewingVersionContent} // Make read-only if viewing historical version
+          />
+        </CardContent>
+      </Card>
+
+      {document.id && document.current_version !== undefined && (
+        <DocumentVersionList
+          documentId={document.id}
+          currentVersionNumber={document.current_version}
+          onViewVersion={handleViewHistoricalVersion}
         />
-      </CardContent>
-    </Card>
+      )}
+    </div>
   );
 };
 
