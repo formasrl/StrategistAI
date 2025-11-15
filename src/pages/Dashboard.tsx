@@ -8,8 +8,14 @@ import { supabase } from '@/integrations/supabase/client';
 import { showSuccess, showError } from '@/utils/toast';
 import ProjectList from '@/components/projects/ProjectList';
 import { PlusCircle, Settings, LogOut } from 'lucide-react';
-import AiReviewDisplay from '@/components/ai/AiReviewDisplay'; // New import
-import { AiReview } from '@/types/supabase'; // New import
+import AiReviewDisplay from '@/components/ai/AiReviewDisplay';
+import { AiReview } from '@/types/supabase';
+
+// Define the type for the Outlet context
+interface DashboardOutletContext {
+  setAiReview: (review: AiReview | null) => void;
+  setIsAiReviewLoading: (isLoading: boolean) => void;
+}
 
 const Dashboard = () => {
   const { session, isLoading } = useSession();
@@ -37,7 +43,8 @@ const Dashboard = () => {
     }
   };
 
-  const outletContextValue = {
+  // The context value to be passed to nested routes
+  const outletContextValue: DashboardOutletContext = {
     setAiReview: setActiveAiReview,
     setIsAiReviewLoading: setIsAiReviewLoading,
   };
@@ -54,7 +61,7 @@ const Dashboard = () => {
             <ProjectList />
           </div>
           <div className="pt-4 border-t border-sidebar-border space-y-2">
-            <Button onClick={() => navigate('/settings')} className="w-full" variant="ghost">
+            <Button onClick={() => navigate('/dashboard/settings')} className="w-full" variant="ghost">
               <Settings className="mr-2 h-4 w-4" /> AI Settings
             </Button>
             <Button onClick={handleLogout} variant="destructive" className="w-full">
