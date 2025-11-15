@@ -5,6 +5,7 @@ import { Project } from '@/types/supabase';
 import { showError } from '@/utils/toast';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import PhaseList from '@/components/phases/PhaseList'; // New import
 
 const ProjectDetails: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
@@ -62,29 +63,36 @@ const ProjectDetails: React.FC = () => {
   }
 
   return (
-    <Card className="w-full">
-      <CardHeader>
-        <CardTitle className="text-3xl font-bold">{project.name}</CardTitle>
-        {project.business_type && (
-          <CardDescription className="text-lg text-muted-foreground">
-            Business Type: {project.business_type}
-          </CardDescription>
-        )}
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {project.timeline && (
+    <div className="space-y-6">
+      <Card className="w-full">
+        <CardHeader>
+          <CardTitle className="text-3xl font-bold">{project.name}</CardTitle>
+          {project.business_type && (
+            <CardDescription className="text-lg text-muted-foreground">
+              Business Type: {project.business_type}
+            </CardDescription>
+          )}
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {project.timeline && (
+            <div>
+              <h3 className="text-xl font-semibold">Timeline</h3>
+              <p className="text-muted-foreground">{project.timeline}</p>
+            </div>
+          )}
           <div>
-            <h3 className="text-xl font-semibold">Timeline</h3>
-            <p className="text-muted-foreground">{project.timeline}</p>
+            <h3 className="text-xl font-semibold">Created At</h3>
+            <p className="text-muted-foreground">{new Date(project.created_at).toLocaleDateString()}</p>
           </div>
-        )}
-        <div>
-          <h3 className="text-xl font-semibold">Created At</h3>
-          <p className="text-muted-foreground">{new Date(project.created_at).toLocaleDateString()}</p>
-        </div>
-        {/* More project details and phases/steps will go here */}
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+
+      {/* Project Roadmap (Phases and Steps) */}
+      <Card className="w-full p-4">
+        <h2 className="text-2xl font-bold mb-4">Project Roadmap</h2>
+        <PhaseList projectId={project.id} />
+      </Card>
+    </div>
   );
 };
 
