@@ -33,6 +33,8 @@ const formSchema = z.object({
   openai_api_key: z.string().optional(),
   preferred_model: z.string().optional(),
   ai_enabled: z.boolean().default(true),
+  theme: z.enum(['light', 'dark']).default('light'), // Added theme
+  timezone: z.string().default('UTC'), // Added timezone
 });
 
 const UserSettings: React.FC = () => {
@@ -48,6 +50,8 @@ const UserSettings: React.FC = () => {
       openai_api_key: '',
       preferred_model: 'gpt-4o',
       ai_enabled: true,
+      theme: 'light', // Default theme
+      timezone: 'UTC', // Default timezone
     },
   });
 
@@ -124,6 +128,8 @@ const UserSettings: React.FC = () => {
           openai_api_key: data.openai_api_key || '',
           preferred_model: data.preferred_model || 'gpt-4o',
           ai_enabled: data.ai_enabled ?? true,
+          theme: (data.theme as 'light' | 'dark') || 'light', // Set theme from fetched data
+          timezone: data.timezone || 'UTC', // Set timezone from fetched data
         });
         // If an API key is present in settings, attempt to fetch models once on initial load
         if (data.openai_api_key && !hasAttemptedModelFetch) {
@@ -152,6 +158,8 @@ const UserSettings: React.FC = () => {
           openai_api_key: values.openai_api_key || null,
           preferred_model: values.preferred_model || null,
           ai_enabled: values.ai_enabled,
+          theme: values.theme, // Save theme
+          timezone: values.timezone, // Save timezone
           updated_at: new Date().toISOString(),
         },
         { onConflict: 'user_id' }
@@ -179,8 +187,8 @@ const UserSettings: React.FC = () => {
   return (
     <Card className="w-full max-w-2xl mx-auto">
       <CardHeader>
-        <CardTitle className="text-2xl font-bold">AI Settings</CardTitle>
-        <CardDescription>Manage your preferences for AI assistance.</CardDescription>
+        <CardTitle className="text-2xl font-bold">User Settings</CardTitle>
+        <CardDescription>Manage your preferences for AI assistance and application display.</CardDescription>
       </CardHeader>
       <CardContent>
         <Form {...form}>
@@ -280,6 +288,63 @@ const UserSettings: React.FC = () => {
                 </FormItem>
               )}
             />
+
+            {/* New Theme Setting */}
+            <FormField
+              control={form.control}
+              name="theme"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Application Theme</FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value}>
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select a theme" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="light">Light</SelectItem>
+                      <SelectItem value="dark">Dark</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FormDescription>
+                    Choose between a light or dark theme for the application.
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            {/* New Timezone Setting */}
+            <FormField
+              control={form.control}
+              name="timezone"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Preferred Timezone</FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value}>
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select your timezone" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="UTC">UTC</SelectItem>
+                      <SelectItem value="America/New_York">America/New_York</SelectItem>
+                      <SelectItem value="Europe/London">Europe/London</SelectItem>
+                      <SelectItem value="Asia/Tokyo">Asia/Tokyo</SelectItem>
+                      <SelectItem value="Australia/Sydney">Australia/Sydney</SelectItem>
+                      {/* Add more timezones as needed */}
+                    </SelectContent>
+                  </Select>
+                  <FormDescription>
+                    Set your preferred timezone for date and time displays.
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
             <Button type="submit">Save Settings</Button>
           </form>
         </Form>
