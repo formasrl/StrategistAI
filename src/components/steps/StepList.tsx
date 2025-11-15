@@ -6,11 +6,12 @@ import StepCard from './StepCard';
 import { Skeleton } from '@/components/ui/skeleton';
 
 interface StepListProps {
-  phaseId: string;
-  projectId: string; // Added projectId prop
+  phaseId: number; // Changed to number
+  projectId: string;
+  onStepStatusChange: () => void; // New callback prop
 }
 
-const StepList: React.FC<StepListProps> = ({ phaseId, projectId }) => {
+const StepList: React.FC<StepListProps> = ({ phaseId, projectId, onStepStatusChange }) => {
   const [steps, setSteps] = useState<Step[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -51,7 +52,7 @@ const StepList: React.FC<StepListProps> = ({ phaseId, projectId }) => {
   return (
     <div className="space-y-2">
       {steps.map((step) => (
-        <StepCard key={step.id} step={step} projectId={projectId} />
+        <StepCard key={step.id} step={step} projectId={projectId} onStatusChange={onStepStatusChange} />
       ))}
     </div>
   );

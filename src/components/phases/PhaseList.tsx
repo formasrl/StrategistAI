@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Phase } from '@/types/supabase';
 import { showError } from '@/utils/toast';
@@ -17,7 +17,7 @@ const PhaseList: React.FC<PhaseListProps> = ({ projectId }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [isCreatePhaseDialogOpen, setIsCreatePhaseDialogOpen] = useState(false);
 
-  const fetchPhases = async () => {
+  const fetchPhases = useCallback(async () => {
     setIsLoading(true);
     const { data, error } = await supabase
       .from('phases')
@@ -32,11 +32,11 @@ const PhaseList: React.FC<PhaseListProps> = ({ projectId }) => {
       setPhases(data || []);
     }
     setIsLoading(false);
-  };
+  }, [projectId]);
 
   useEffect(() => {
     fetchPhases();
-  }, [projectId]);
+  }, [fetchPhases]);
 
   if (isLoading) {
     return (
@@ -58,7 +58,7 @@ const PhaseList: React.FC<PhaseListProps> = ({ projectId }) => {
         <p className="text-muted-foreground text-center italic">No phases defined for this project. Click "Add New Phase" to get started!</p>
       ) : (
         phases.map((phase) => (
-          <PhaseCard key={phase.id} phase={phase} projectId={projectId} onStepCreated={fetchPhases} />
+          <PhaseCard key={phase.id} phase={phase} projectId={projectId} onPhaseUpdated={fetchPhases} />
         ))
       )}
       <CreatePhaseDialog
