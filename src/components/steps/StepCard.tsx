@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Step } from '@/types/supabase';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { CheckCircle2, CircleDot, Loader2, FileText } from 'lucide-react';
+import { CheckCircle2, CircleDot, Loader2, FileText, CalendarDays } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import DocumentList from '@/components/documents/DocumentList'; // New import
 
@@ -48,6 +48,12 @@ const StepCard: React.FC<StepCardProps> = ({ step, projectId }) => {
                 <Badge key={index} variant="outline">{dep}</Badge>
               ))}
             </div>
+          </div>
+        )}
+        {step.timeline && (
+          <div className="mt-2 flex items-center text-xs text-muted-foreground">
+            <CalendarDays className="mr-1 h-3 w-3" />
+            <span>Timeline: {step.timeline}</span>
           </div>
         )}
         <div className="mt-4 border-t border-border pt-4">

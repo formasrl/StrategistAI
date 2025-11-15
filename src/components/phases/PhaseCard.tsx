@@ -49,6 +49,11 @@ const PhaseCard: React.FC<PhaseCardProps> = ({ phase, projectId, onStepCreated }
               </CollapsibleTrigger>
             </div>
           </div>
+          {phase.description && (
+            <CardDescription className="mt-2 text-muted-foreground">
+              {phase.description}
+            </CardDescription>
+          )}
           <CardDescription className="mt-2">
             <Progress value={phase.completion_percentage} className="h-2" />
             <span className="text-sm text-muted-foreground mt-1 block">

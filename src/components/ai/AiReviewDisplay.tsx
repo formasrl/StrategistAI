@@ -37,7 +37,15 @@ const AiReviewDisplay: React.FC<AiReviewDisplayProps> = ({ review, isLoading }) 
           <CardTitle className="text-lg">Strengths</CardTitle>
         </CardHeader>
         <CardContent className="p-4 pt-0 text-sm text-muted-foreground">
-          {review.strengths || 'No strengths identified.'}
+          {review.strengths && review.strengths.length > 0 ? (
+            <ul className="list-disc pl-5 space-y-1">
+              {review.strengths.map((strength, index) => (
+                <li key={index}>{strength}</li>
+              ))}
+            </ul>
+          ) : (
+            'No strengths identified.'
+          )}
         </CardContent>
       </Card>
 
@@ -47,7 +55,19 @@ const AiReviewDisplay: React.FC<AiReviewDisplayProps> = ({ review, isLoading }) 
           <CardTitle className="text-lg">Suggestions</CardTitle>
         </CardHeader>
         <CardContent className="p-4 pt-0 text-sm text-muted-foreground">
-          {review.suggestions || 'No suggestions provided.'}
+          {review.suggestions && review.suggestions.length > 0 ? (
+            <ul className="list-disc pl-5 space-y-2">
+              {review.suggestions.map((suggestion, index) => (
+                <li key={index}>
+                  <p className="font-medium text-foreground">{suggestion.title}</p>
+                  <p>{suggestion.description}</p>
+                  {suggestion.example && <p className="italic text-xs">Example: {suggestion.example}</p>}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            'No suggestions provided.'
+          )}
         </CardContent>
       </Card>
 
@@ -57,7 +77,18 @@ const AiReviewDisplay: React.FC<AiReviewDisplayProps> = ({ review, isLoading }) 
           <CardTitle className="text-lg">Conflicts</CardTitle>
         </CardHeader>
         <CardContent className="p-4 pt-0 text-sm text-muted-foreground">
-          {review.conflicts || 'No conflicts detected.'}
+          {review.conflicts && review.conflicts.length > 0 ? (
+            <ul className="list-disc pl-5 space-y-2">
+              {review.conflicts.map((conflict, index) => (
+                <li key={index}>
+                  <p className="font-medium text-foreground">Issue: {conflict.issue}</p>
+                  {conflict.resolution && <p>Resolution: {conflict.resolution}</p>}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            'No conflicts detected.'
+          )}
         </CardContent>
       </Card>
 
@@ -67,7 +98,15 @@ const AiReviewDisplay: React.FC<AiReviewDisplayProps> = ({ review, isLoading }) 
           <CardTitle className="text-lg">Alternatives</CardTitle>
         </CardHeader>
         <CardContent className="p-4 pt-0 text-sm text-muted-foreground">
-          {review.alternatives || 'No alternatives suggested.'}
+          {review.alternatives && review.alternatives.length > 0 ? (
+            <ul className="list-disc pl-5 space-y-1">
+              {review.alternatives.map((alternative, index) => (
+                <li key={index}>{alternative}</li>
+              ))}
+            </ul>
+          ) : (
+            'No alternatives suggested.'
+          )}
         </CardContent>
       </Card>
     </div>
