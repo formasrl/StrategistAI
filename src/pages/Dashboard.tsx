@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 import { showSuccess, showError } from '@/utils/toast';
 import ProjectList from '@/components/projects/ProjectList';
-import { PlusCircle, Settings, LogOut } from 'lucide-react';
+import { PlusCircle, Settings, LogOut, UserCircle2 } from 'lucide-react'; // Added UserCircle2 icon
 import AiPanelContent from '@/components/ai/AiPanelContent';
 import { AiReview } from '@/types/supabase';
 
@@ -117,6 +117,9 @@ const Dashboard = () => {
             <ProjectList />
           </div>
           <div className="pt-4 border-t border-sidebar-border space-y-2">
+            <Button onClick={() => navigate('/dashboard/profile')} className="w-full" variant="ghost">
+              <UserCircle2 className="mr-2 h-4 w-4" /> Profile
+            </Button>
             <Button onClick={() => navigate('/dashboard/settings')} className="w-full" variant="ghost">
               <Settings className="mr-2 h-4 w-4" /> AI Settings
             </Button>

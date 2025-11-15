@@ -11,6 +11,7 @@ import Dashboard from "./pages/Dashboard";
 import ProjectDetails from "./pages/ProjectDetails";
 import DocumentEditor from "./pages/DocumentEditor";
 import UserSettings from "./pages/UserSettings";
+import Profile from "./pages/Profile"; // New import
 import { SessionContextProvider } from "./integrations/supabase/SessionContextProvider";
 
 const queryClient = new QueryClient();
@@ -37,7 +38,8 @@ const App = () => (
               } />
               <Route path=":projectId" element={<ProjectDetails />} />
               <Route path=":projectId/document/:documentId" element={<DocumentEditor />} />
-              <Route path="settings" element={<UserSettings />} /> {/* Corrected route for UserSettings */}
+              <Route path="settings" element={<UserSettings />} />
+              <Route path="profile" element={<Profile />} /> {/* New route for Profile */}
             </Route>
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
