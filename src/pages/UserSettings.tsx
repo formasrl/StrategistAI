@@ -27,6 +27,7 @@ import { UserSettings as UserSettingsType } from '@/types/supabase';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import { Loader2 } from 'lucide-react';
 
 const formSchema = z.object({
   openai_api_key: z.string().optional(),
@@ -37,6 +38,8 @@ const formSchema = z.object({
 const UserSettings: React.FC = () => {
   const { user, isLoading: isSessionLoading } = useSession();
   const [isLoadingSettings, setIsLoadingSettings] = useState(true);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -47,6 +50,9 @@ const UserSettings: React.FC = () => {
     },
   });
 
+  const openaiApiKey = form.watch('openai_api_key');
+
+  // Effect to fetch user settings from Supabase
   useEffect(() => {
     const fetchSettings = async () => {
       if (!user) {
@@ -59,9 +65,9 @@ const UserSettings: React.FC = () => {
         .from('user_settings')
         .select('*')
         .eq('user_id', user.id)
-        .maybeSingle(); // Changed to maybeSingle()
+        .maybeSingle();
 
-      if (error) { // Removed the PGRST116 check as maybeSingle handles no rows gracefully
+      if (error) {
         showError(`Failed to load settings: ${error.message}`);
       } else if (data) {
         form.reset({
@@ -77,6 +83,53 @@ const UserSettings: React.FC = () => {
       fetchSettings();
     }
   }, [user, isSessionLoading, form]);
+
+  // Effect to fetch OpenAI models when API key changes
+  useEffect(() => {
+    const fetchOpenAIModels = async (apiKey: string) => {
+      setIsLoadingModels(true);
+      setAvailableModels([]); // Clear previous models
+
+      try {
+        const response = await fetch('https://api.openai.com/v1/models', {
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error?.message || 'Failed to fetch OpenAI models.');
+        }
+
+        const data = await response.json();
+        const chatModels = data.data
+          .filter((model: any) => model.id.startsWith('gpt-') || model.id.startsWith('ft:gpt-'))
+          .map((model: any) => model.id)
+          .sort();
+
+        setAvailableModels(chatModels);
+        // If the current preferred model is not in the new list, reset it to a default or first available
+        if (form.getValues('preferred_model') && !chatModels.includes(form.getValues('preferred_model'))) {
+          form.setValue('preferred_model', chatModels.length > 0 ? chatModels[0] : 'gpt-4o');
+        }
+      } catch (error: any) {
+        showError(`Error fetching OpenAI models: ${error.message}`);
+        setAvailableModels([]);
+      } finally {
+        setIsLoadingModels(false);
+      }
+    };
+
+    if (openaiApiKey) {
+      fetchOpenAIModels(openaiApiKey);
+    } else {
+      setAvailableModels([]);
+      setIsLoadingModels(false);
+    }
+  }, [openaiApiKey, form]);
+
 
   const onSubmit = async (values: z.infer<typeof formSchema>) => {
     if (!user) {
@@ -128,16 +181,16 @@ const UserSettings: React.FC = () => {
                 <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
                   <div className="space-y-0.5">
                     <FormLabel className="text-base">Enable AI Features</FormLabel>
-                    <FormControl>
-                      <Switch
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
-                      />
-                    </FormControl>
                     <FormDescription>
                       Toggle AI assistance on or off for your projects.
                     </FormDescription>
                   </div>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                    />
+                  </FormControl>
                 </FormItem>
               )}
             />
@@ -167,16 +220,30 @@ const UserSettings: React.FC = () => {
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Preferred AI Model</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+                  <Select onValueChange={field.onChange} value={field.value}>
                     <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a preferred AI model" />
+                      <SelectTrigger disabled={isLoadingModels || !openaiApiKey}>
+                        {isLoadingModels ? (
+                          <span className="flex items-center">
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading models...
+                          </span>
+                        ) : (
+                          <SelectValue placeholder="Select a preferred AI model" />
+                        )}
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value="gpt-4o">GPT-4o (Recommended)</SelectItem>
-                      <SelectItem value="gpt-4-turbo">GPT-4 Turbo</SelectItem>
-                      <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo</SelectItem>
+                      {availableModels.length > 0 ? (
+                        availableModels.map((model) => (
+                          <SelectItem key={model} value={model}>
+                            {model}
+                          </SelectItem>
+                        ))
+                      ) : (
+                        <SelectItem value="gpt-4o" disabled={!!openaiApiKey}>
+                          GPT-4o (Default)
+                        </SelectItem>
+                      )}
                     </SelectContent>
                   </Select>
                   <FormDescription>
