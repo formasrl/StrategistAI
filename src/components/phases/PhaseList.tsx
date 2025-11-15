@@ -4,9 +4,9 @@ import { Phase } from '@/types/supabase';
 import { showError } from '@/utils/toast';
 import PhaseCard from './PhaseCard';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Button } from '@/components/ui/button';
-import { PlusCircle } from 'lucide-react';
-import CreatePhaseDialog from './CreatePhaseDialog';
+// import { Button } from '@/components/ui/button'; // Removed as no longer needed
+// import { PlusCircle } from 'lucide-react'; // Removed as no longer needed
+// import CreatePhaseDialog from './CreatePhaseDialog'; // Removed as no longer needed
 
 interface PhaseListProps {
   projectId: string;
@@ -15,7 +15,7 @@ interface PhaseListProps {
 const PhaseList: React.FC<PhaseListProps> = ({ projectId }) => {
   const [phases, setPhases] = useState<Phase[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isCreatePhaseDialogOpen, setIsCreatePhaseDialogOpen] = useState(false);
+  // const [isCreatePhaseDialogOpen, setIsCreatePhaseDialogOpen] = useState(false); // Removed as no longer needed
 
   const fetchPhases = useCallback(async () => {
     setIsLoading(true);
@@ -49,24 +49,15 @@ const PhaseList: React.FC<PhaseListProps> = ({ projectId }) => {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
-        <Button onClick={() => setIsCreatePhaseDialogOpen(true)} variant="outline">
-          <PlusCircle className="mr-2 h-4 w-4" /> Add New Phase
-        </Button>
-      </div>
+      {/* Removed "Add New Phase" button */}
       {phases.length === 0 ? (
-        <p className="text-muted-foreground text-center italic">No phases defined for this project. Click "Add New Phase" to get started!</p>
+        <p className="text-muted-foreground text-center italic">No phases defined for this project. This indicates an issue with project creation. Please contact support.</p>
       ) : (
         phases.map((phase) => (
           <PhaseCard key={phase.id} phase={phase} projectId={projectId} onPhaseUpdated={fetchPhases} />
         ))
       )}
-      <CreatePhaseDialog
-        projectId={projectId}
-        isOpen={isCreatePhaseDialogOpen}
-        onClose={() => setIsCreatePhaseDialogOpen(false)}
-        onPhaseCreated={fetchPhases}
-      />
+      {/* Removed CreatePhaseDialog */}
     </div>
   );
 };

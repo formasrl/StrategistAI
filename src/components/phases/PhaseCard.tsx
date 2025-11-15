@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Phase, Step } from '@/types/supabase';
+import { Phase } from '@/types/supabase';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { ChevronDown, ChevronUp, PlusCircle, Edit } from 'lucide-react'; // Added Edit icon
+import { ChevronDown, ChevronUp } from 'lucide-react'; // Removed PlusCircle, Edit icons
 import { Progress } from '@/components/ui/progress';
 import StepList from '@/components/steps/StepList';
-import CreateStepDialog from '@/components/steps/CreateStepDialog';
-import EditPhaseDialog from './EditPhaseDialog'; // New import
+// import CreateStepDialog from '@/components/steps/CreateStepDialog'; // Removed as no longer needed
+// import EditPhaseDialog from './EditPhaseDialog'; // Removed as no longer needed
 import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/integrations/supabase/client';
 import { showError } from '@/utils/toast';
@@ -33,8 +33,8 @@ const getStatusBadge = (status: Phase['status']) => {
 
 const PhaseCard: React.FC<PhaseCardProps> = ({ phase, projectId, onPhaseUpdated }) => {
   const [isCollapsed, setIsCollapsed] = useState(true);
-  const [isCreateStepDialogOpen, setIsCreateStepDialogOpen] = useState(false);
-  const [isEditPhaseDialogOpen, setIsEditPhaseDialogOpen] = useState(false); // New state for edit dialog
+  // const [isCreateStepDialogOpen, setIsCreateStepDialogOpen] = useState(false); // Removed as no longer needed
+  // const [isEditPhaseDialogOpen, setIsEditPhaseDialogOpen] = useState(false); // Removed as no longer needed
   const [currentPhase, setCurrentPhase] = useState<Phase>(phase);
 
   const calculatePhaseProgress = useCallback(async () => {
@@ -100,14 +100,7 @@ const PhaseCard: React.FC<PhaseCardProps> = ({ phase, projectId, onPhaseUpdated 
     calculatePhaseProgress(); // Recalculate when a step is created or its status changes
   };
 
-  const handlePhaseEdit = () => {
-    setIsEditPhaseDialogOpen(true);
-  };
-
-  const handlePhaseUpdated = () => {
-    onPhaseUpdated(); // Trigger parent to re-fetch all phases
-    calculatePhaseProgress(); // Also recalculate progress for this specific phase
-  };
+  // Removed handlePhaseEdit and handlePhaseUpdated as edit functionality is removed
 
   return (
     <Card className="mb-4">
@@ -119,10 +112,7 @@ const PhaseCard: React.FC<PhaseCardProps> = ({ phase, projectId, onPhaseUpdated 
             </CardTitle>
             <div className="flex items-center gap-2">
               {getStatusBadge(currentPhase.status)}
-              <Button variant="ghost" size="sm" onClick={handlePhaseEdit}>
-                <Edit className="h-4 w-4" />
-                <span className="sr-only">Edit phase</span>
-              </Button>
+              {/* Removed Edit button */}
               <CollapsibleTrigger asChild>
                 <Button variant="ghost" size="sm">
                   {isCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
@@ -146,33 +136,15 @@ const PhaseCard: React.FC<PhaseCardProps> = ({ phase, projectId, onPhaseUpdated 
             <div className="border-t border-border pt-4">
               <div className="flex justify-between items-center mb-3">
                 <h4 className="text-lg font-semibold">Steps</h4>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setIsCreateStepDialogOpen(true)}
-                >
-                  <PlusCircle className="mr-2 h-4 w-4" /> Add Step
-                </Button>
+                {/* Removed "Add Step" button */}
               </div>
               <StepList phaseId={currentPhase.id} projectId={projectId} onStepStatusChange={handleStepContentChange} />
             </div>
           </CollapsibleContent>
         </Collapsible>
       </CardHeader>
-      <CreateStepDialog
-        phaseId={currentPhase.id}
-        isOpen={isCreateStepDialogOpen}
-        onClose={() => setIsCreateStepDialogOpen(false)}
-        onStepCreated={handleStepContentChange} // Recalculate when a new step is created
-      />
-      {isEditPhaseDialogOpen && (
-        <EditPhaseDialog
-          phase={currentPhase}
-          isOpen={isEditPhaseDialogOpen}
-          onClose={() => setIsEditPhaseDialogOpen(false)}
-          onPhaseUpdated={handlePhaseUpdated}
-        />
-      )}
+      {/* Removed CreateStepDialog */}
+      {/* Removed EditPhaseDialog */}
     </Card>
   );
 };
