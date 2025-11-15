@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -20,6 +20,7 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Loader2 } from 'lucide-react'; // Import Loader2 icon
 
 const formSchema = z.object({
   name: z.string().min(2, {
@@ -32,6 +33,7 @@ const formSchema = z.object({
 const ProjectCreation = () => {
   const { user, isLoading } = useSession();
   const navigate = useNavigate();
+  const [isSubmitting, setIsSubmitting] = useState(false); // New state for submission status
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -49,73 +51,79 @@ const ProjectCreation = () => {
       return;
     }
 
-    // 1. Create the project
-    const { data: projectData, error: projectError } = await supabase
-      .from('projects')
-      .insert({
-        user_id: user.id,
-        name: values.name,
-        business_type: values.business_type,
-        timeline: values.timeline,
-      })
-      .select()
-      .single();
+    setIsSubmitting(true); // Set submitting to true
 
-    if (projectError) {
-      showError(`Failed to create project: ${projectError.message}`);
-      return;
-    }
-
-    const newProjectId = projectData.id;
-
-    // 2. Seed initial phases and steps for the new project
-    for (const initialPhase of initialRoadmapData) {
-      const { data: phaseData, error: phaseError } = await supabase
-        .from('phases')
+    try {
+      // 1. Create the project
+      const { data: projectData, error: projectError } = await supabase
+        .from('projects')
         .insert({
-          project_id: newProjectId,
-          phase_name: initialPhase.phase_name,
-          phase_number: initialPhase.phase_number,
-          description: initialPhase.description,
-          status: 'not_started',
-          completion_percentage: 0,
+          user_id: user.id,
+          name: values.name,
+          business_type: values.business_type,
+          timeline: values.timeline,
         })
         .select()
         .single();
 
-      if (phaseError) {
-        showError(`Failed to create phase "${initialPhase.phase_name}": ${phaseError.message}`);
-        // Optionally, you might want to delete the project and already created phases here
+      if (projectError) {
+        showError(`Failed to create project: ${projectError.message}`);
         return;
       }
 
-      const newPhaseId = phaseData.id;
+      const newProjectId = projectData.id;
 
-      for (const initialStep of initialPhase.steps) {
-        const { error: stepError } = await supabase
-          .from('steps')
+      // 2. Seed initial phases and steps for the new project
+      for (const initialPhase of initialRoadmapData) {
+        const { data: phaseData, error: phaseError } = await supabase
+          .from('phases')
           .insert({
-            phase_id: newPhaseId,
-            step_name: initialStep.step_name,
-            step_number: initialStep.step_number,
-            description: initialStep.description,
-            why_matters: initialStep.why_matters,
-            dependencies: initialStep.dependencies,
-            timeline: initialStep.timeline,
-            order_index: initialStep.order_index,
+            project_id: newProjectId,
+            phase_name: initialPhase.phase_name,
+            phase_number: initialPhase.phase_number,
+            description: initialPhase.description,
             status: 'not_started',
-          });
+            completion_percentage: 0,
+          })
+          .select()
+          .single();
 
-        if (stepError) {
-          showError(`Failed to create step "${initialStep.step_name}" in phase "${initialPhase.phase_name}": ${stepError.message}`);
-          // Optionally, you might want to delete the project and already created phases/steps here
+        if (phaseError) {
+          showError(`Failed to create phase "${initialPhase.phase_name}": ${phaseError.message}`);
+          // Optionally, you might want to delete the project and already created phases here
           return;
         }
-      }
-    }
 
-    showSuccess('Project and roadmap created successfully!');
-    navigate(`/dashboard/${newProjectId}`); // Redirect to the new project's dashboard
+        const newPhaseId = phaseData.id;
+
+        for (const initialStep of initialPhase.steps) {
+          const { error: stepError } = await supabase
+            .from('steps')
+            .insert({
+              phase_id: newPhaseId,
+              step_name: initialStep.step_name,
+              step_number: initialStep.step_number,
+              description: initialStep.description,
+              why_matters: initialStep.why_matters,
+              dependencies: initialStep.dependencies,
+              timeline: initialStep.timeline,
+              order_index: initialStep.order_index,
+              status: 'not_started',
+            });
+
+          if (stepError) {
+            showError(`Failed to create step "${initialStep.step_name}" in phase "${initialPhase.phase_name}": ${stepError.message}`);
+            // Optionally, you might want to delete the project and already created phases/steps here
+            return;
+          }
+        }
+      }
+
+      showSuccess('Project and roadmap created successfully!');
+      navigate(`/dashboard/${newProjectId}`); // Redirect to the new project's dashboard
+    } finally {
+      setIsSubmitting(false); // Reset submitting to false
+    }
   };
 
   if (isLoading) {
@@ -173,8 +181,12 @@ const ProjectCreation = () => {
                   </FormItem>
                 )}
               />
-              <Button type="submit" className="w-full">
-                Create Project
+              <Button type="submit" className="w-full" disabled={isSubmitting}>
+                {isSubmitting ? (
+                  <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Creating Project...</>
+                ) : (
+                  'Create Project'
+                )}
               </Button>
             </form>
           </Form>
