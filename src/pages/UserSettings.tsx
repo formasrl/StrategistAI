@@ -19,6 +19,7 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
+  FormDescription, // <--- ADDED THIS IMPORT
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -128,16 +129,16 @@ const UserSettings: React.FC = () => {
                 <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
                   <div className="space-y-0.5">
                     <FormLabel className="text-base">Enable AI Features</FormLabel>
-                    <FormDescription>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                    <FormDescription> {/* <--- FormDescription is now defined */}
                       Toggle AI assistance on or off for your projects.
                     </FormDescription>
                   </div>
-                  <FormControl>
-                    <Switch
-                      checked={field.value}
-                      onCheckedChange={field.onChange}
-                    />
-                  </FormControl>
                 </FormItem>
               )}
             />
@@ -154,7 +155,7 @@ const UserSettings: React.FC = () => {
                       {...field}
                     />
                   </FormControl>
-                  <FormDescription>
+                  <FormDescription> {/* <--- FormDescription is now defined */}
                     Provide your OpenAI API key to enable advanced AI features. This is stored securely.
                   </FormDescription>
                   <FormMessage />
@@ -179,7 +180,7 @@ const UserSettings: React.FC = () => {
                       <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo</SelectItem>
                     </SelectContent>
                   </Select>
-                  <FormDescription>
+                  <FormDescription> {/* <--- FormDescription is now defined */}
                     Choose the OpenAI model you'd like to use for AI assistance.
                   </FormDescription>
                   <FormMessage />
