@@ -1,14 +1,25 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { useParams, useOutletContext } from 'react-router-dom';
+import { useParams, useOutletContext, useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Document, AiReview } from '@/types/supabase';
 import { showError, showSuccess } from '@/utils/toast';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
-import { Save, Brain, Loader2, RotateCcw } from 'lucide-react';
+import { Save, Brain, Loader2, RotateCcw, Trash2 } from 'lucide-react';
 import DocumentVersionList from '@/components/documents/DocumentVersionList';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css'; // Import Quill styles
@@ -19,12 +30,14 @@ interface DocumentEditorOutletContext {
 }
 
 const DocumentEditor: React.FC = () => {
-  const { documentId } = useParams<{ documentId: string }>();
+  const { projectId, documentId } = useParams<{ projectId: string; documentId: string }>();
+  const navigate = useNavigate();
   const [document, setDocument] = useState<Document | null>(null);
   const [isLoadingDocument, setIsLoadingDocument] = useState(true);
   const [content, setContent] = useState<string>('');
   const [status, setStatus] = useState<Document['status']>('draft');
   const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [aiReview, setAiReviewState] = useState<AiReview | null>(null);
   const [isLoadingAiReview, setIsLoadingAiReviewState] = useState(false);
   const { setAiReview, setIsAiReviewLoading } = useOutletContext<DocumentEditorOutletContext>();
@@ -132,6 +145,31 @@ const DocumentEditor: React.FC = () => {
       showError(`Save failed: ${error.message}`);
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleDeleteDocument = async () => {
+    if (!documentId || isDeleting) return;
+
+    setIsDeleting(true);
+    try {
+      // Supabase RLS should handle cascading deletes if foreign keys are set up correctly
+      // For example, deleting a document should cascade to document_versions and ai_reviews
+      const { error } = await supabase
+        .from('documents')
+        .delete()
+        .eq('id', documentId);
+
+      if (error) {
+        throw new Error(`Failed to delete document: ${error.message}`);
+      }
+
+      showSuccess('Document deleted successfully!');
+      navigate(`/dashboard/${projectId}`); // Redirect to the project details page
+    } catch (error: any) {
+      showError(`Delete failed: ${error.message}`);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -272,6 +310,29 @@ const DocumentEditor: React.FC = () => {
             <Button onClick={handleSave} disabled={isSaving || !!viewingVersionContent}>
               {isSaving ? 'Saving...' : <><Save className="mr-2 h-4 w-4" /> Save Document</>}
             </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="destructive" size="icon" disabled={isDeleting || !!viewingVersionContent}>
+                  {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                  <span className="sr-only">Delete Document</span>
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This action cannot be undone. This will permanently delete this document
+                    and all its associated versions and AI reviews.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleDeleteDocument} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                    Delete
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </div>
         </CardHeader>
         <CardContent className="flex-1 flex flex-col p-6 pt-0">
