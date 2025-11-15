@@ -1,14 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { useSession } from '@/integrations/supabase/SessionContextProvider';
-import { useNavigate, Outlet } from 'react-router-dom';
-import { useEffect } from 'react';
+import { useNavigate, Outlet, useParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 import { showSuccess, showError } from '@/utils/toast';
 import ProjectList from '@/components/projects/ProjectList';
 import { PlusCircle, Settings, LogOut } from 'lucide-react';
-import AiReviewDisplay from '@/components/ai/AiReviewDisplay';
+import AiPanelContent from '@/components/ai/AiPanelContent';
 import { AiReview } from '@/types/supabase';
 
 // Define the type for the Outlet context
@@ -20,6 +19,8 @@ interface DashboardOutletContext {
 const Dashboard = () => {
   const { session, isLoading } = useSession();
   const navigate = useNavigate();
+  const { projectId, documentId } = useParams<{ projectId?: string; documentId?: string }>();
+
   const [activeAiReview, setActiveAiReview] = useState<AiReview | null>(null);
   const [isAiReviewLoading, setIsAiReviewLoading] = useState(false);
 
@@ -28,6 +29,61 @@ const Dashboard = () => {
       navigate('/login');
     }
   }, [session, isLoading, navigate]);
+
+  // Function to fetch the latest AI review for a given document
+  const fetchLatestAiReview = useCallback(async (docId: string) => {
+    setIsAiReviewLoading(true);
+    const { data: reviewData, error: reviewError } = await supabase
+      .from('ai_reviews')
+      .select('*')
+      .eq('document_id', docId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(); // Use maybeSingle to handle no rows gracefully
+
+    if (reviewError && reviewError.code !== 'PGRST116') { // PGRST116 means no rows found
+      console.error('Error fetching AI review:', reviewError);
+      setActiveAiReview(null);
+      showError(`Failed to load AI review: ${reviewError.message}`);
+    } else if (reviewData) {
+      setActiveAiReview(reviewData);
+    } else {
+      setActiveAiReview(null);
+    }
+    setIsAiReviewLoading(false);
+  }, []);
+
+  // Handle AI review generation from the AI panel
+  const handleGenerateAiReviewFromPanel = useCallback(async (docId: string) => {
+    if (!docId || isAiReviewLoading) return;
+
+    setIsAiReviewLoading(true);
+    const { data, error } = await supabase.functions.invoke('generate-ai-review', {
+      body: { documentId: docId },
+    });
+
+    if (error) {
+      showError(`AI review failed: ${error.message}`);
+      setActiveAiReview(null);
+    } else {
+      showSuccess('AI review generated successfully!');
+      // Refetch the latest review from the database to ensure consistency
+      await fetchLatestAiReview(docId);
+    }
+    setIsAiReviewLoading(false);
+  }, [isAiReviewLoading, fetchLatestAiReview]);
+
+
+  // Reset AI review state and fetch new review when documentId changes
+  useEffect(() => {
+    if (documentId) {
+      fetchLatestAiReview(documentId);
+    } else {
+      setActiveAiReview(null);
+      setIsAiReviewLoading(false);
+    }
+  }, [documentId, fetchLatestAiReview]);
+
 
   if (isLoading) {
     return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
@@ -78,7 +134,12 @@ const Dashboard = () => {
       aiPanel={
         <div className="space-y-4">
           <h2 className="text-xl font-semibold text-sidebar-foreground">AI Assistant</h2>
-          <AiReviewDisplay review={activeAiReview} isLoading={isAiReviewLoading} />
+          <AiPanelContent
+            documentId={documentId}
+            aiReview={activeAiReview}
+            isAiReviewLoading={isAiReviewLoading}
+            onGenerateReview={handleGenerateAiReviewFromPanel}
+          />
         </div>
       }
     />
