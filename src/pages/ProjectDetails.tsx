@@ -1,16 +1,31 @@
 import React, { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Project } from '@/types/supabase';
-import { showError } from '@/utils/toast';
+import { showError, showSuccess } from '@/utils/toast';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import PhaseList from '@/components/phases/PhaseList'; // New import
+import PhaseList from '@/components/phases/PhaseList';
+import { Button } from '@/components/ui/button';
+import { Trash2 } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 
 const ProjectDetails: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
+  const navigate = useNavigate();
   const [project, setProject] = useState<Project | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     const fetchProject = async () => {
@@ -37,6 +52,24 @@ const ProjectDetails: React.FC = () => {
 
     fetchProject();
   }, [projectId]);
+
+  const handleDeleteProject = async () => {
+    if (!projectId) return;
+
+    setIsDeleting(true);
+    const { error } = await supabase
+      .from('projects')
+      .delete()
+      .eq('id', projectId);
+
+    if (error) {
+      showError(`Failed to delete project: ${error.message}`);
+    } else {
+      showSuccess('Project deleted successfully!');
+      navigate('/dashboard');
+    }
+    setIsDeleting(false);
+  };
 
   if (isLoading) {
     return (
@@ -65,13 +98,37 @@ const ProjectDetails: React.FC = () => {
   return (
     <div className="space-y-6">
       <Card className="w-full">
-        <CardHeader>
-          <CardTitle className="text-3xl font-bold">{project.name}</CardTitle>
-          {project.business_type && (
-            <CardDescription className="text-lg text-muted-foreground">
-              Business Type: {project.business_type}
-            </CardDescription>
-          )}
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle className="text-3xl font-bold">{project.name}</CardTitle>
+            {project.business_type && (
+              <CardDescription className="text-lg text-muted-foreground">
+                Business Type: {project.business_type}
+              </CardDescription>
+            )}
+          </div>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="destructive" disabled={isDeleting}>
+                {isDeleting ? 'Deleting...' : <><Trash2 className="mr-2 h-4 w-4" /> Delete Project</>}
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This action cannot be undone. This will permanently delete your project
+                  and all associated data (phases, steps, documents, AI reviews).
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={handleDeleteProject} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                  Delete
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </CardHeader>
         <CardContent className="space-y-4">
           {project.timeline && (

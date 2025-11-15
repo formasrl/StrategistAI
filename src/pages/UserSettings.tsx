@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -27,7 +27,7 @@ import { UserSettings as UserSettingsType } from '@/types/supabase';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Loader2 } from 'lucide-react';
+import { Loader2, RefreshCcw } from 'lucide-react';
 
 const formSchema = z.object({
   openai_api_key: z.string().optional(),
@@ -40,17 +40,67 @@ const UserSettings: React.FC = () => {
   const [isLoadingSettings, setIsLoadingSettings] = useState(true);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
+  const [hasAttemptedModelFetch, setHasAttemptedModelFetch] = useState(false);
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       openai_api_key: '',
-      preferred_model: 'gpt-4o', // Default model
+      preferred_model: 'gpt-4o',
       ai_enabled: true,
     },
   });
 
   const openaiApiKey = form.watch('openai_api_key');
+
+  // Function to fetch OpenAI models
+  const fetchOpenAIModels = useCallback(async (apiKey: string) => {
+    if (!apiKey) {
+      setAvailableModels([]);
+      setHasAttemptedModelFetch(false);
+      showError('Please provide an OpenAI API key to fetch models.');
+      return;
+    }
+
+    setIsLoadingModels(true);
+    setAvailableModels([]);
+    setHasAttemptedModelFetch(true);
+
+    try {
+      const response = await fetch('https://api.openai.com/v1/models', {
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error?.message || 'Failed to fetch OpenAI models.');
+      }
+
+      const data = await response.json();
+      const chatModels = data.data
+        .filter((model: any) => model.id.startsWith('gpt-') || model.id.startsWith('ft:gpt-'))
+        .map((model: any) => model.id)
+        .sort();
+
+      setAvailableModels(chatModels);
+      if (form.getValues('preferred_model') && !chatModels.includes(form.getValues('preferred_model'))) {
+        form.setValue('preferred_model', chatModels.length > 0 ? chatModels[0] : 'gpt-4o');
+      } else if (!form.getValues('preferred_model') && chatModels.length > 0) {
+        form.setValue('preferred_model', chatModels[0]);
+      }
+      showSuccess('OpenAI models updated successfully!');
+    } catch (error: any) {
+      showError(`Error fetching OpenAI models: ${error.message}`);
+      setAvailableModels([]);
+      form.setValue('preferred_model', 'gpt-4o');
+    } finally {
+      setIsLoadingModels(false);
+    }
+  }, [form]);
+
 
   // Effect to fetch user settings from Supabase
   useEffect(() => {
@@ -75,6 +125,10 @@ const UserSettings: React.FC = () => {
           preferred_model: data.preferred_model || 'gpt-4o',
           ai_enabled: data.ai_enabled ?? true,
         });
+        // If an API key is present in settings, attempt to fetch models once on initial load
+        if (data.openai_api_key && !hasAttemptedModelFetch) {
+          fetchOpenAIModels(data.openai_api_key);
+        }
       }
       setIsLoadingSettings(false);
     };
@@ -82,54 +136,7 @@ const UserSettings: React.FC = () => {
     if (!isSessionLoading) {
       fetchSettings();
     }
-  }, [user, isSessionLoading, form]);
-
-  // Effect to fetch OpenAI models when API key changes
-  useEffect(() => {
-    const fetchOpenAIModels = async (apiKey: string) => {
-      setIsLoadingModels(true);
-      setAvailableModels([]); // Clear previous models
-
-      try {
-        const response = await fetch('https://api.openai.com/v1/models', {
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-          },
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.error?.message || 'Failed to fetch OpenAI models.');
-        }
-
-        const data = await response.json();
-        const chatModels = data.data
-          .filter((model: any) => model.id.startsWith('gpt-') || model.id.startsWith('ft:gpt-'))
-          .map((model: any) => model.id)
-          .sort();
-
-        setAvailableModels(chatModels);
-        // If the current preferred model is not in the new list, reset it to a default or first available
-        if (form.getValues('preferred_model') && !chatModels.includes(form.getValues('preferred_model'))) {
-          form.setValue('preferred_model', chatModels.length > 0 ? chatModels[0] : 'gpt-4o');
-        }
-      } catch (error: any) {
-        showError(`Error fetching OpenAI models: ${error.message}`);
-        setAvailableModels([]);
-      } finally {
-        setIsLoadingModels(false);
-      }
-    };
-
-    if (openaiApiKey) {
-      fetchOpenAIModels(openaiApiKey);
-    } else {
-      setAvailableModels([]);
-      setIsLoadingModels(false);
-    }
-  }, [openaiApiKey, form]);
-
+  }, [user, isSessionLoading, form, fetchOpenAIModels, hasAttemptedModelFetch]);
 
   const onSubmit = async (values: z.infer<typeof formSchema>) => {
     if (!user) {
@@ -154,6 +161,10 @@ const UserSettings: React.FC = () => {
       showError(`Failed to save settings: ${error.message}`);
     } else {
       showSuccess('Settings saved successfully!');
+      // If API key was just updated, trigger model fetch
+      if (values.openai_api_key && values.openai_api_key !== openaiApiKey) {
+        fetchOpenAIModels(values.openai_api_key);
+      }
     }
   };
 
@@ -219,10 +230,26 @@ const UserSettings: React.FC = () => {
               name="preferred_model"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Preferred AI Model</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value}>
+                  <div className="flex items-center justify-between">
+                    <FormLabel>Preferred AI Model</FormLabel>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => fetchOpenAIModels(openaiApiKey || '')}
+                      disabled={isLoadingModels || !openaiApiKey}
+                    >
+                      {isLoadingModels ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCcw className="mr-2 h-4 w-4" />
+                      )}
+                      Update Models
+                    </Button>
+                  </div>
+                  <Select onValueChange={field.onChange} value={field.value} disabled={isLoadingModels || !openaiApiKey}>
                     <FormControl>
-                      <SelectTrigger disabled={isLoadingModels || !openaiApiKey}>
+                      <SelectTrigger>
                         {isLoadingModels ? (
                           <span className="flex items-center">
                             <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading models...
@@ -247,7 +274,7 @@ const UserSettings: React.FC = () => {
                     </SelectContent>
                   </Select>
                   <FormDescription>
-                    Choose the OpenAI model you'd like to use for AI assistance.
+                    Choose the OpenAI model you'd like to use for AI assistance. Click "Update Models" to fetch available models after entering your API key.
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
