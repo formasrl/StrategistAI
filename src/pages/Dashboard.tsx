@@ -6,8 +6,9 @@ import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 import { showSuccess, showError } from '@/utils/toast';
 import ProjectList from '@/components/projects/ProjectList';
-import { PlusCircle, Settings, LogOut, UserCircle2 } from 'lucide-react'; // Added UserCircle2 icon
-import AiPanelContent from '@/components/ai/AiPanelContent';
+import { PlusCircle, Settings, LogOut, UserCircle2 } from 'lucide-react';
+// import AiPanelContent from '@/components/ai/AiPanelContent'; // Removed
+import AiChatbot from '@/components/ai/AiChatbot'; // New import for AiChatbot
 import { AiReview } from '@/types/supabase';
 
 // Define the type for the Outlet context
@@ -20,6 +21,8 @@ const Dashboard = () => {
   const { session, isLoading } = useSession();
   const navigate = useNavigate();
   const { projectId, documentId } = useParams<{ projectId?: string; documentId?: string }>();
+  const phaseId = parseInt(useParams<{ phaseId?: string }>().phaseId || '0'); // Assuming phaseId can be extracted if needed
+  const stepId = parseInt(useParams<{ stepId?: string }>().stepId || '0'); // Assuming stepId can be extracted if needed
 
   const [activeAiReview, setActiveAiReview] = useState<AiReview | null>(null);
   const [isAiReviewLoading, setIsAiReviewLoading] = useState(false);
@@ -37,7 +40,7 @@ const Dashboard = () => {
       .from('ai_reviews')
       .select('*')
       .eq('document_id', docId)
-      .order('created_at', { ascending: false })
+      .order('review_timestamp', { ascending: false })
       .limit(1)
       .maybeSingle(); // Use maybeSingle to handle no rows gracefully
 
@@ -60,6 +63,9 @@ const Dashboard = () => {
     setIsAiReviewLoading(true);
     const { data, error } = await supabase.functions.invoke('generate-ai-review', {
       body: { documentId: docId },
+      headers: {
+        Authorization: `Bearer ${session?.access_token}`,
+      },
     });
 
     if (error) {
@@ -71,7 +77,7 @@ const Dashboard = () => {
       await fetchLatestAiReview(docId);
     }
     setIsAiReviewLoading(false);
-  }, [isAiReviewLoading, fetchLatestAiReview]);
+  }, [isAiReviewLoading, fetchLatestAiReview, session?.access_token]);
 
 
   // Reset AI review state and fetch new review when documentId changes
@@ -135,13 +141,12 @@ const Dashboard = () => {
         </div>
       }
       aiPanel={
-        <div className="space-y-4">
-          <h2 className="text-xl font-semibold text-sidebar-foreground">AI Assistant</h2>
-          <AiPanelContent
+        <div className="space-y-4 h-full flex flex-col">
+          <AiChatbot
+            projectId={projectId}
+            phaseId={phaseId}
+            stepId={stepId}
             documentId={documentId}
-            aiReview={activeAiReview}
-            isAiReviewLoading={isAiReviewLoading}
-            onGenerateReview={handleGenerateAiReviewFromPanel}
           />
         </div>
       }
