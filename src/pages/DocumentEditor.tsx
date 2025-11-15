@@ -5,12 +5,13 @@ import { Document, AiReview } from '@/types/supabase';
 import { showError, showSuccess } from '@/utils/toast';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
-import { Save, Brain, Loader2, History, RotateCcw } from 'lucide-react';
-import AiReviewDisplay from '@/components/ai/AiReviewDisplay';
+import { Save, Brain, Loader2, RotateCcw } from 'lucide-react';
 import DocumentVersionList from '@/components/documents/DocumentVersionList';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'; // New import
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+
+import ReactQuill from 'react-quill';
+import 'react-quill/dist/quill.snow.css'; // Import Quill styles
 
 interface DocumentEditorOutletContext {
   setAiReview: (review: AiReview | null) => void;
@@ -22,17 +23,15 @@ const DocumentEditor: React.FC = () => {
   const [document, setDocument] = useState<Document | null>(null);
   const [isLoadingDocument, setIsLoadingDocument] = useState(true);
   const [content, setContent] = useState<string>('');
-  const [status, setStatus] = useState<Document['status']>('draft'); // State for document status
+  const [status, setStatus] = useState<Document['status']>('draft');
   const [isSaving, setIsSaving] = useState(false);
   const [aiReview, setAiReviewState] = useState<AiReview | null>(null);
   const [isLoadingAiReview, setIsLoadingAiReviewState] = useState(false);
   const { setAiReview, setIsAiReviewLoading } = useOutletContext<DocumentEditorOutletContext>();
 
-  // State for viewing historical versions
   const [viewingVersionContent, setViewingVersionContent] = useState<string | null>(null);
   const [viewingVersionNumber, setViewingVersionNumber] = useState<number | null>(null);
 
-  // Sync AI review state with DashboardLayout context
   useEffect(() => {
     setAiReview(aiReview);
   }, [aiReview, setAiReview]);
@@ -65,20 +64,19 @@ const DocumentEditor: React.FC = () => {
     } else {
       setDocument(data);
       setContent(data?.content || '');
-      setStatus(data?.status || 'draft'); // Set initial status
-      setViewingVersionContent(null); // Reset viewing historical content
+      setStatus(data?.status || 'draft');
+      setViewingVersionContent(null);
       setViewingVersionNumber(data?.current_version || null);
 
-      // Fetch latest AI review for this document
       const { data: reviewData, error: reviewError } = await supabase
         .from('ai_reviews')
         .select('*')
         .eq('document_id', documentId)
-        .order('review_timestamp', { ascending: false }) // Use review_timestamp
+        .order('review_timestamp', { ascending: false })
         .limit(1)
         .maybeSingle();
 
-      if (reviewError && reviewError.code !== 'PGRST116') { // PGRST116 means no rows found
+      if (reviewError && reviewError.code !== 'PGRST116') {
         console.error('Error fetching AI review:', reviewError);
         setAiReviewState(null);
       } else if (reviewData) {
@@ -101,25 +99,23 @@ const DocumentEditor: React.FC = () => {
     try {
       const newVersionNumber = (document.current_version || 0) + 1;
 
-      // 1. Insert new version into document_versions
       const { error: versionError } = await supabase.from('document_versions').insert({
         document_id: document.id,
         content: content,
         version: newVersionNumber,
-        change_description: `Saved version ${newVersionNumber}`, // Can be enhanced with user input
+        change_description: `Saved version ${newVersionNumber}`,
       });
 
       if (versionError) {
         throw new Error(`Failed to create document version: ${versionError.message}`);
       }
 
-      // 2. Update the main document with the new content, version, and status
       const { error: documentUpdateError } = await supabase
         .from('documents')
         .update({
           content: content,
           current_version: newVersionNumber,
-          status: status, // Update status here
+          status: status,
           updated_at: new Date().toISOString(),
         })
         .eq('id', document.id);
@@ -130,7 +126,7 @@ const DocumentEditor: React.FC = () => {
 
       showSuccess('Document saved and new version created successfully!');
       setDocument((prev) => prev ? { ...prev, content: content, current_version: newVersionNumber, status: status } : null);
-      setViewingVersionContent(null); // Ensure we're viewing the latest after save
+      setViewingVersionContent(null);
       setViewingVersionNumber(newVersionNumber);
     } catch (error: any) {
       showError(`Save failed: ${error.message}`);
@@ -140,9 +136,9 @@ const DocumentEditor: React.FC = () => {
   };
 
   const handleStatusChange = async (newStatus: Document['status']) => {
-    if (!document || isSaving || !!viewingVersionContent) return; // Prevent status change when viewing historical or saving
+    if (!document || isSaving || !!viewingVersionContent) return;
 
-    setStatus(newStatus); // Optimistic update
+    setStatus(newStatus);
     const { error } = await supabase
       .from('documents')
       .update({ status: newStatus, updated_at: new Date().toISOString() })
@@ -150,7 +146,6 @@ const DocumentEditor: React.FC = () => {
 
     if (error) {
       showError(`Failed to update document status: ${error.message}`);
-      // Revert status on error
       setStatus(document.status);
     } else {
       showSuccess(`Document status updated to "${newStatus.replace('_', ' ')}".`);
@@ -172,7 +167,6 @@ const DocumentEditor: React.FC = () => {
       }
 
       showSuccess('AI review generated successfully!');
-      // Refetch the latest review from the database to ensure consistency
       await fetchDocumentAndReview();
     } catch (error: any) {
       showError(`AI review failed: ${error.message}`);
@@ -193,6 +187,24 @@ const DocumentEditor: React.FC = () => {
     setViewingVersionNumber(document?.current_version || null);
     showSuccess('Switched back to the latest document version.');
   };
+
+  const modules = {
+    toolbar: [
+      [{ 'header': [1, 2, false] }],
+      ['bold', 'italic', 'underline', 'strike', 'blockquote'],
+      [{ 'list': 'ordered' }, { 'list': 'bullet' }],
+      [{ 'indent': '-1' }, { 'indent': '+1' }],
+      ['link', 'image'],
+      ['clean']
+    ],
+  };
+
+  const formats = [
+    'header',
+    'bold', 'italic', 'underline', 'strike', 'blockquote',
+    'list', 'bullet', 'indent',
+    'link', 'image'
+  ];
 
   if (isLoadingDocument) {
     return (
@@ -263,12 +275,15 @@ const DocumentEditor: React.FC = () => {
           </div>
         </CardHeader>
         <CardContent className="flex-1 flex flex-col p-6 pt-0">
-          <Textarea
+          <ReactQuill
+            theme="snow"
             value={viewingVersionContent !== null ? viewingVersionContent : content}
-            onChange={(e) => setContent(e.target.value)}
+            onChange={setContent}
+            modules={modules}
+            formats={formats}
+            readOnly={!!viewingVersionContent}
             placeholder="Start writing your document here..."
-            className="flex-1 min-h-[300px] resize-none"
-            readOnly={!!viewingVersionContent} // Make read-only if viewing historical version
+            className="flex-1 min-h-[300px] flex flex-col"
           />
         </CardContent>
       </Card>
