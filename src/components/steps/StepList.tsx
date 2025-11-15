@@ -7,9 +7,10 @@ import { Skeleton } from '@/components/ui/skeleton';
 
 interface StepListProps {
   phaseId: string;
+  projectId: string; // Added projectId prop
 }
 
-const StepList: React.FC<StepListProps> = ({ phaseId }) => {
+const StepList: React.FC<StepListProps> = ({ phaseId, projectId }) => {
   const [steps, setSteps] = useState<Step[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -50,7 +51,7 @@ const StepList: React.FC<StepListProps> = ({ phaseId }) => {
   return (
     <div className="space-y-2">
       {steps.map((step) => (
-        <StepCard key={step.id} step={step} />
+        <StepCard key={step.id} step={step} projectId={projectId} />
       ))}
     </div>
   );

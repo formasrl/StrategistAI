@@ -1,12 +1,14 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Step } from '@/types/supabase';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { CheckCircle2, CircleDot, Loader2 } from 'lucide-react';
+import { CheckCircle2, CircleDot, Loader2, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import DocumentList from '@/components/documents/DocumentList'; // New import
 
 interface StepCardProps {
   step: Step;
+  projectId: string; // Added projectId prop
 }
 
 const getStatusBadge = (status: Step['status']) => {
@@ -21,7 +23,7 @@ const getStatusBadge = (status: Step['status']) => {
   }
 };
 
-const StepCard: React.FC<StepCardProps> = ({ step }) => {
+const StepCard: React.FC<StepCardProps> = ({ step, projectId }) => {
   return (
     <Card className="mb-2">
       <CardHeader className="flex flex-row items-center justify-between space-y-0 p-4 pb-2">
@@ -48,6 +50,12 @@ const StepCard: React.FC<StepCardProps> = ({ step }) => {
             </div>
           </div>
         )}
+        <div className="mt-4 border-t border-border pt-4">
+          <h5 className="text-base font-semibold mb-2 flex items-center gap-1">
+            <FileText className="h-4 w-4" /> Documents
+          </h5>
+          <DocumentList projectId={projectId} stepId={step.id} />
+        </div>
       </CardContent>
     </Card>
   );

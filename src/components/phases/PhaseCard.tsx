@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 
 interface PhaseCardProps {
   phase: Phase;
+  projectId: string; // Added projectId prop
   onStepCreated: () => void; // Callback to refresh phase list if needed
 }
 
@@ -26,7 +27,7 @@ const getStatusBadge = (status: Phase['status']) => {
   }
 };
 
-const PhaseCard: React.FC<PhaseCardProps> = ({ phase, onStepCreated }) => {
+const PhaseCard: React.FC<PhaseCardProps> = ({ phase, projectId, onStepCreated }) => {
   const [isCollapsed, setIsCollapsed] = useState(true);
   const [isCreateStepDialogOpen, setIsCreateStepDialogOpen] = useState(false);
 
@@ -66,7 +67,7 @@ const PhaseCard: React.FC<PhaseCardProps> = ({ phase, onStepCreated }) => {
                   <PlusCircle className="mr-2 h-4 w-4" /> Add Step
                 </Button>
               </div>
-              <StepList phaseId={phase.id} />
+              <StepList phaseId={phase.id} projectId={projectId} />
             </div>
           </CollapsibleContent>
         </Collapsible>

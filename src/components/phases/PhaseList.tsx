@@ -58,7 +58,7 @@ const PhaseList: React.FC<PhaseListProps> = ({ projectId }) => {
         <p className="text-muted-foreground text-center italic">No phases defined for this project. Click "Add New Phase" to get started!</p>
       ) : (
         phases.map((phase) => (
-          <PhaseCard key={phase.id} phase={phase} onStepCreated={fetchPhases} />
+          <PhaseCard key={phase.id} phase={phase} projectId={projectId} onStepCreated={fetchPhases} />
         ))
       )}
       <CreatePhaseDialog
