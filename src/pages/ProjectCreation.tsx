@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useSession } from '@/integrations/supabase/SessionContextProvider';
 import { showSuccess, showError } from '@/utils/toast';
+import { initialRoadmapData } from '@/utils/initialRoadmapData'; // Import the initial roadmap data
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -48,7 +49,8 @@ const ProjectCreation = () => {
       return;
     }
 
-    const { data, error } = await supabase
+    // 1. Create the project
+    const { data: projectData, error: projectError } = await supabase
       .from('projects')
       .insert({
         user_id: user.id,
@@ -56,14 +58,64 @@ const ProjectCreation = () => {
         business_type: values.business_type,
         timeline: values.timeline,
       })
-      .select();
+      .select()
+      .single();
 
-    if (error) {
-      showError(`Failed to create project: ${error.message}`);
-    } else {
-      showSuccess('Project created successfully!');
-      navigate('/dashboard'); // Redirect to dashboard after creation
+    if (projectError) {
+      showError(`Failed to create project: ${projectError.message}`);
+      return;
     }
+
+    const newProjectId = projectData.id;
+
+    // 2. Seed initial phases and steps for the new project
+    for (const initialPhase of initialRoadmapData) {
+      const { data: phaseData, error: phaseError } = await supabase
+        .from('phases')
+        .insert({
+          project_id: newProjectId,
+          phase_name: initialPhase.phase_name,
+          phase_number: initialPhase.phase_number,
+          description: initialPhase.description,
+          status: 'not_started',
+          completion_percentage: 0,
+        })
+        .select()
+        .single();
+
+      if (phaseError) {
+        showError(`Failed to create phase "${initialPhase.phase_name}": ${phaseError.message}`);
+        // Optionally, you might want to delete the project and already created phases here
+        return;
+      }
+
+      const newPhaseId = phaseData.id;
+
+      for (const initialStep of initialPhase.steps) {
+        const { error: stepError } = await supabase
+          .from('steps')
+          .insert({
+            phase_id: newPhaseId,
+            step_name: initialStep.step_name,
+            step_number: initialStep.step_number,
+            description: initialStep.description,
+            why_matters: initialStep.why_matters,
+            dependencies: initialStep.dependencies,
+            timeline: initialStep.timeline,
+            order_index: initialStep.order_index,
+            status: 'not_started',
+          });
+
+        if (stepError) {
+          showError(`Failed to create step "${initialStep.step_name}" in phase "${initialPhase.phase_name}": ${stepError.message}`);
+          // Optionally, you might want to delete the project and already created phases/steps here
+          return;
+        }
+      }
+    }
+
+    showSuccess('Project and roadmap created successfully!');
+    navigate(`/dashboard/${newProjectId}`); // Redirect to the new project's dashboard
   };
 
   if (isLoading) {
