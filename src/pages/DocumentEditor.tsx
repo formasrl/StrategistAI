@@ -1,48 +1,84 @@
 import React, { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useOutletContext } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
-import { Document } from '@/types/supabase';
-import { showError } from '@/utils/toast';
+import { Document, AiReview } from '@/types/supabase';
+import { showError, showSuccess } from '@/utils/toast';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
-import { Save } from 'lucide-react';
-import { showSuccess } from '@/utils/toast';
+import { Save, Brain, Loader2 } from 'lucide-react';
+import AiReviewDisplay from '@/components/ai/AiReviewDisplay'; // New import
+
+interface DocumentEditorOutletContext {
+  setAiReview: (review: AiReview | null) => void;
+  setIsAiReviewLoading: (isLoading: boolean) => void;
+}
 
 const DocumentEditor: React.FC = () => {
   const { documentId } = useParams<{ documentId: string }>();
   const [document, setDocument] = useState<Document | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingDocument, setIsLoadingDocument] = useState(true);
   const [content, setContent] = useState<string>('');
   const [isSaving, setIsSaving] = useState(false);
+  const [aiReview, setAiReviewState] = useState<AiReview | null>(null);
+  const [isLoadingAiReview, setIsLoadingAiReviewState] = useState(false);
+  const { setAiReview, setIsAiReviewLoading } = useOutletContext<DocumentEditorOutletContext>();
+
+  // Sync AI review state with DashboardLayout context
+  useEffect(() => {
+    setAiReview(aiReview);
+  }, [aiReview, setAiReview]);
 
   useEffect(() => {
-    const fetchDocument = async () => {
-      if (!documentId) {
-        setIsLoading(false);
-        return;
-      }
+    setIsAiReviewLoading(isLoadingAiReview);
+  }, [isLoadingAiReview, setIsAiReviewLoading]);
 
-      setIsLoading(true);
-      const { data, error } = await supabase
-        .from('documents')
+
+  const fetchDocumentAndReview = async () => {
+    if (!documentId) {
+      setIsLoadingDocument(false);
+      return;
+    }
+
+    setIsLoadingDocument(true);
+    const { data, error } = await supabase
+      .from('documents')
+      .select('*')
+      .eq('id', documentId)
+      .single();
+
+    if (error) {
+      showError(`Failed to load document: ${error.message}`);
+      setDocument(null);
+      setContent('');
+      setAiReviewState(null);
+    } else {
+      setDocument(data);
+      setContent(data?.content || '');
+      // Fetch latest AI review for this document
+      const { data: reviewData, error: reviewError } = await supabase
+        .from('ai_reviews')
         .select('*')
-        .eq('id', documentId)
+        .eq('document_id', documentId)
+        .order('created_at', { ascending: false })
+        .limit(1)
         .single();
 
-      if (error) {
-        showError(`Failed to load document: ${error.message}`);
-        setDocument(null);
-        setContent('');
+      if (reviewError && reviewError.code !== 'PGRST116') { // PGRST116 means no rows found
+        console.error('Error fetching AI review:', reviewError);
+        setAiReviewState(null);
+      } else if (reviewData) {
+        setAiReviewState(reviewData);
       } else {
-        setDocument(data);
-        setContent(data?.content || '');
+        setAiReviewState(null);
       }
-      setIsLoading(false);
-    };
+    }
+    setIsLoadingDocument(false);
+  };
 
-    fetchDocument();
+  useEffect(() => {
+    fetchDocumentAndReview();
   }, [documentId]);
 
   const handleSave = async () => {
@@ -51,20 +87,38 @@ const DocumentEditor: React.FC = () => {
     setIsSaving(true);
     const { error } = await supabase
       .from('documents')
-      .update({ content: content, updated_at: new Date().toISOString() }) // Assuming updated_at exists
+      .update({ content: content, updated_at: new Date().toISOString() })
       .eq('id', document.id);
 
     if (error) {
       showError(`Failed to save document: ${error.message}`);
     } else {
       showSuccess('Document saved successfully!');
-      // Optionally, update the document state to reflect the saved content
       setDocument((prev) => prev ? { ...prev, content: content } : null);
     }
     setIsSaving(false);
   };
 
-  if (isLoading) {
+  const handleGenerateAiReview = async () => {
+    if (!document || isLoadingAiReview) return;
+
+    setIsAiReviewState(true);
+    const { data, error } = await supabase.functions.invoke('generate-ai-review', {
+      body: { documentId: document.id },
+    });
+
+    if (error) {
+      showError(`AI review failed: ${error.message}`);
+      setAiReviewState(null);
+    } else {
+      showSuccess('AI review generated successfully!');
+      // Refetch the latest review from the database to ensure consistency
+      await fetchDocumentAndReview();
+    }
+    setIsAiReviewState(false);
+  };
+
+  if (isLoadingDocument) {
     return (
       <Card className="w-full h-full flex flex-col">
         <CardHeader>
@@ -95,9 +149,18 @@ const DocumentEditor: React.FC = () => {
             Status: {document.status} | Version: {document.current_version}
           </CardDescription>
         </div>
-        <Button onClick={handleSave} disabled={isSaving}>
-          {isSaving ? 'Saving...' : <><Save className="mr-2 h-4 w-4" /> Save Document</>}
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={handleGenerateAiReview} disabled={isLoadingAiReview}>
+            {isLoadingAiReview ? (
+              <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating...</>
+            ) : (
+              <><Brain className="mr-2 h-4 w-4" /> Generate AI Review</>
+            )}
+          </Button>
+          <Button onClick={handleSave} disabled={isSaving}>
+            {isSaving ? 'Saving...' : <><Save className="mr-2 h-4 w-4" /> Save Document</>}
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="flex-1 flex flex-col p-6 pt-0">
         <Textarea

@@ -1,17 +1,21 @@
-import React from 'react';
+import React, { useState } from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { useSession } from '@/integrations/supabase/SessionContextProvider';
-import { useNavigate, Outlet } from 'react-router-dom';
+import { useNavigate, Outlet, OutletContext } from 'react-router-dom';
 import { useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 import { showSuccess, showError } from '@/utils/toast';
 import ProjectList from '@/components/projects/ProjectList';
-import { PlusCircle, Settings, LogOut } from 'lucide-react'; // Added Settings and LogOut icons
+import { PlusCircle, Settings, LogOut } from 'lucide-react';
+import AiReviewDisplay from '@/components/ai/AiReviewDisplay'; // New import
+import { AiReview } from '@/types/supabase'; // New import
 
 const Dashboard = () => {
   const { session, isLoading } = useSession();
   const navigate = useNavigate();
+  const [activeAiReview, setActiveAiReview] = useState<AiReview | null>(null);
+  const [isAiReviewLoading, setIsAiReviewLoading] = useState(false);
 
   useEffect(() => {
     if (!isLoading && !session) {
@@ -31,6 +35,11 @@ const Dashboard = () => {
       showSuccess('You have been logged out.');
       navigate('/login');
     }
+  };
+
+  const outletContextValue = {
+    setAiReview: setActiveAiReview,
+    setIsAiReviewLoading: setIsAiReviewLoading,
   };
 
   return (
@@ -56,13 +65,13 @@ const Dashboard = () => {
       }
       mainContent={
         <div className="h-full">
-          <Outlet /> {/* Renders nested routes like ProjectDetails */}
+          <Outlet context={outletContextValue} /> {/* Pass context to nested routes */}
         </div>
       }
       aiPanel={
         <div className="space-y-4">
           <h2 className="text-xl font-semibold text-sidebar-foreground">AI Assistant</h2>
-          <p className="text-sidebar-foreground/80">AI suggestions will appear here.</p>
+          <AiReviewDisplay review={activeAiReview} isLoading={isAiReviewLoading} />
         </div>
       }
     />
