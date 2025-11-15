@@ -9,7 +9,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Save, Brain, Loader2, History, RotateCcw } from 'lucide-react';
 import AiReviewDisplay from '@/components/ai/AiReviewDisplay';
-import DocumentVersionList from '@/components/documents/DocumentVersionList'; // New import
+import DocumentVersionList from '@/components/documents/DocumentVersionList';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'; // New import
 
 interface DocumentEditorOutletContext {
   setAiReview: (review: AiReview | null) => void;
@@ -21,6 +22,7 @@ const DocumentEditor: React.FC = () => {
   const [document, setDocument] = useState<Document | null>(null);
   const [isLoadingDocument, setIsLoadingDocument] = useState(true);
   const [content, setContent] = useState<string>('');
+  const [status, setStatus] = useState<Document['status']>('draft'); // State for document status
   const [isSaving, setIsSaving] = useState(false);
   const [aiReview, setAiReviewState] = useState<AiReview | null>(null);
   const [isLoadingAiReview, setIsLoadingAiReviewState] = useState(false);
@@ -56,12 +58,14 @@ const DocumentEditor: React.FC = () => {
       showError(`Failed to load document: ${error.message}`);
       setDocument(null);
       setContent('');
+      setStatus('draft');
       setAiReviewState(null);
       setViewingVersionContent(null);
       setViewingVersionNumber(null);
     } else {
       setDocument(data);
       setContent(data?.content || '');
+      setStatus(data?.status || 'draft'); // Set initial status
       setViewingVersionContent(null); // Reset viewing historical content
       setViewingVersionNumber(data?.current_version || null);
 
@@ -109,12 +113,13 @@ const DocumentEditor: React.FC = () => {
         throw new Error(`Failed to create document version: ${versionError.message}`);
       }
 
-      // 2. Update the main document with the new content and version
+      // 2. Update the main document with the new content, version, and status
       const { error: documentUpdateError } = await supabase
         .from('documents')
         .update({
           content: content,
           current_version: newVersionNumber,
+          status: status, // Update status here
           updated_at: new Date().toISOString(),
         })
         .eq('id', document.id);
@@ -124,13 +129,32 @@ const DocumentEditor: React.FC = () => {
       }
 
       showSuccess('Document saved and new version created successfully!');
-      setDocument((prev) => prev ? { ...prev, content: content, current_version: newVersionNumber } : null);
+      setDocument((prev) => prev ? { ...prev, content: content, current_version: newVersionNumber, status: status } : null);
       setViewingVersionContent(null); // Ensure we're viewing the latest after save
       setViewingVersionNumber(newVersionNumber);
     } catch (error: any) {
       showError(`Save failed: ${error.message}`);
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleStatusChange = async (newStatus: Document['status']) => {
+    if (!document || isSaving || !!viewingVersionContent) return; // Prevent status change when viewing historical or saving
+
+    setStatus(newStatus); // Optimistic update
+    const { error } = await supabase
+      .from('documents')
+      .update({ status: newStatus, updated_at: new Date().toISOString() })
+      .eq('id', document.id);
+
+    if (error) {
+      showError(`Failed to update document status: ${error.message}`);
+      // Revert status on error
+      setStatus(document.status);
+    } else {
+      showSuccess(`Document status updated to "${newStatus.replace('_', ' ')}".`);
+      setDocument((prev) => prev ? { ...prev, status: newStatus } : null);
     }
   };
 
@@ -199,11 +223,28 @@ const DocumentEditor: React.FC = () => {
           <div>
             <CardTitle className="text-2xl font-bold">{document.document_name}</CardTitle>
             <CardDescription className="text-muted-foreground">
-              Status: {document.status} | Version: {viewingVersionNumber}
+              Version: {viewingVersionNumber}
               {viewingVersionContent && <span className="ml-2 text-yellow-600 dark:text-yellow-400">(Historical View)</span>}
             </CardDescription>
           </div>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            <Select
+              onValueChange={(value: Document['status']) => handleStatusChange(value)}
+              value={status}
+              disabled={!!viewingVersionContent || isSaving}
+            >
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Select Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="draft">Draft</SelectItem>
+                <SelectItem value="in_progress">In Progress</SelectItem>
+                <SelectItem value="in_review">In Review</SelectItem>
+                <SelectItem value="complete">Complete</SelectItem>
+                <SelectItem value="approved">Approved</SelectItem>
+              </SelectContent>
+            </Select>
+
             {viewingVersionContent && (
               <Button onClick={handleBackToLatest} variant="outline">
                 <RotateCcw className="mr-2 h-4 w-4" /> Back to Latest
