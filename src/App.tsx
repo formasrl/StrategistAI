@@ -9,7 +9,8 @@ import Login from "./pages/Login";
 import ProjectCreation from "./pages/ProjectCreation";
 import Dashboard from "./pages/Dashboard";
 import ProjectDetails from "./pages/ProjectDetails";
-import DocumentEditor from "./pages/DocumentEditor"; // New import
+import DocumentEditor from "./pages/DocumentEditor";
+import UserSettings from "./pages/UserSettings"; // New import
 import { SessionContextProvider } from "./integrations/supabase/SessionContextProvider";
 
 const queryClient = new QueryClient();
@@ -35,8 +36,9 @@ const App = () => (
                 </div>
               } />
               <Route path=":projectId" element={<ProjectDetails />} />
-              <Route path=":projectId/document/:documentId" element={<DocumentEditor />} /> {/* New route */}
+              <Route path=":projectId/document/:documentId" element={<DocumentEditor />} />
             </Route>
+            <Route path="/settings" element={<Dashboard mainContent={<UserSettings />} sidebar={null} aiPanel={null} />} /> {/* New route for UserSettings */}
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>

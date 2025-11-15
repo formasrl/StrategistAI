@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 import { showSuccess, showError } from '@/utils/toast';
 import ProjectList from '@/components/projects/ProjectList';
-import { PlusCircle } from 'lucide-react';
+import { PlusCircle, Settings, LogOut } from 'lucide-react'; // Added Settings and LogOut icons
 
 const Dashboard = () => {
   const { session, isLoading } = useSession();
@@ -36,15 +36,20 @@ const Dashboard = () => {
   return (
     <DashboardLayout
       sidebar={
-        <div className="space-y-4">
+        <div className="space-y-4 flex flex-col h-full">
           <h2 className="text-xl font-semibold text-sidebar-foreground">Your Projects</h2>
           <Button onClick={() => navigate('/project/new')} className="w-full" variant="outline">
             <PlusCircle className="mr-2 h-4 w-4" /> Create New Project
           </Button>
-          <ProjectList />
-          <div className="pt-4 border-t border-sidebar-border">
+          <div className="flex-1 overflow-y-auto">
+            <ProjectList />
+          </div>
+          <div className="pt-4 border-t border-sidebar-border space-y-2">
+            <Button onClick={() => navigate('/settings')} className="w-full" variant="ghost">
+              <Settings className="mr-2 h-4 w-4" /> AI Settings
+            </Button>
             <Button onClick={handleLogout} variant="destructive" className="w-full">
-              Logout
+              <LogOut className="mr-2 h-4 w-4" /> Logout
             </Button>
           </div>
         </div>
