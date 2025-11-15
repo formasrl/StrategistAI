@@ -3,10 +3,11 @@ import { Phase, Step } from '@/types/supabase';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { ChevronDown, ChevronUp, PlusCircle } from 'lucide-react';
+import { ChevronDown, ChevronUp, PlusCircle, Edit } from 'lucide-react'; // Added Edit icon
 import { Progress } from '@/components/ui/progress';
 import StepList from '@/components/steps/StepList';
 import CreateStepDialog from '@/components/steps/CreateStepDialog';
+import EditPhaseDialog from './EditPhaseDialog'; // New import
 import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/integrations/supabase/client';
 import { showError } from '@/utils/toast';
@@ -33,6 +34,7 @@ const getStatusBadge = (status: Phase['status']) => {
 const PhaseCard: React.FC<PhaseCardProps> = ({ phase, projectId, onPhaseUpdated }) => {
   const [isCollapsed, setIsCollapsed] = useState(true);
   const [isCreateStepDialogOpen, setIsCreateStepDialogOpen] = useState(false);
+  const [isEditPhaseDialogOpen, setIsEditPhaseDialogOpen] = useState(false); // New state for edit dialog
   const [currentPhase, setCurrentPhase] = useState<Phase>(phase);
 
   const calculatePhaseProgress = useCallback(async () => {
@@ -98,6 +100,15 @@ const PhaseCard: React.FC<PhaseCardProps> = ({ phase, projectId, onPhaseUpdated 
     calculatePhaseProgress(); // Recalculate when a step is created or its status changes
   };
 
+  const handlePhaseEdit = () => {
+    setIsEditPhaseDialogOpen(true);
+  };
+
+  const handlePhaseUpdated = () => {
+    onPhaseUpdated(); // Trigger parent to re-fetch all phases
+    calculatePhaseProgress(); // Also recalculate progress for this specific phase
+  };
+
   return (
     <Card className="mb-4">
       <CardHeader className="p-4 pb-2">
@@ -108,6 +119,10 @@ const PhaseCard: React.FC<PhaseCardProps> = ({ phase, projectId, onPhaseUpdated 
             </CardTitle>
             <div className="flex items-center gap-2">
               {getStatusBadge(currentPhase.status)}
+              <Button variant="ghost" size="sm" onClick={handlePhaseEdit}>
+                <Edit className="h-4 w-4" />
+                <span className="sr-only">Edit phase</span>
+              </Button>
               <CollapsibleTrigger asChild>
                 <Button variant="ghost" size="sm">
                   {isCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
@@ -150,6 +165,14 @@ const PhaseCard: React.FC<PhaseCardProps> = ({ phase, projectId, onPhaseUpdated 
         onClose={() => setIsCreateStepDialogOpen(false)}
         onStepCreated={handleStepContentChange} // Recalculate when a new step is created
       />
+      {isEditPhaseDialogOpen && (
+        <EditPhaseDialog
+          phase={currentPhase}
+          isOpen={isEditPhaseDialogOpen}
+          onClose={() => setIsEditPhaseDialogOpen(false)}
+          onPhaseUpdated={handlePhaseUpdated}
+        />
+      )}
     </Card>
   );
 };
