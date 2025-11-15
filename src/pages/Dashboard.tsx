@@ -7,8 +7,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { showSuccess, showError } from '@/utils/toast';
 import ProjectList from '@/components/projects/ProjectList';
 import { PlusCircle, Settings, LogOut, UserCircle2 } from 'lucide-react';
-// import AiPanelContent from '@/components/ai/AiPanelContent'; // Removed
-import AiChatbot from '@/components/ai/AiChatbot'; // New import for AiChatbot
+import AiPanel from '@/components/ai/AiPanel'; // New import for AiPanel
 import { AiReview } from '@/types/supabase';
 
 // Define the type for the Outlet context
@@ -142,11 +141,14 @@ const Dashboard = () => {
       }
       aiPanel={
         <div className="space-y-4 h-full flex flex-col">
-          <AiChatbot
+          <AiPanel
             projectId={projectId}
             phaseId={phaseId}
             stepId={stepId}
             documentId={documentId}
+            aiReview={activeAiReview}
+            isAiReviewLoading={isAiReviewLoading}
+            onGenerateReview={handleGenerateAiReviewFromPanel}
           />
         </div>
       }
