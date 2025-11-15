@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { useSession } from '@/integrations/supabase/SessionContextProvider';
-import { useNavigate, Outlet, OutletContext } from 'react-router-dom';
+import { useNavigate, Outlet } from 'react-router-dom';
 import { useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';

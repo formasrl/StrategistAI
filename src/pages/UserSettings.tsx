@@ -103,20 +103,12 @@ const UserSettings: React.FC = () => {
     }
   };
 
+  // Temporary debug output
   if (isSessionLoading || isLoadingSettings) {
     return (
-      <Card className="w-full max-w-2xl mx-auto">
-        <CardHeader>
-          <Skeleton className="h-8 w-3/4 mb-2" />
-          <Skeleton className="h-4 w-1/2" />
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <Skeleton className="h-10 w-full" />
-          <Skeleton className="h-10 w-full" />
-          <Skeleton className="h-10 w-full" />
-          <Skeleton className="h-10 w-24" />
-        </CardContent>
-      </Card>
+      <div className="min-h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-white">
+        <p className="text-xl">Loading AI Settings...</p>
+      </div>
     );
   }
 
