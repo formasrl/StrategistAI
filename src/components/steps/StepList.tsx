@@ -46,6 +46,7 @@ const StepList: React.FC<StepListProps> = ({ phaseId, projectId, onStepStatusCha
   useEffect(() => {
     const fetchSteps = async () => {
       setIsLoading(true);
+      console.log(`[StepList] Fetching steps for phaseId: ${phaseId}`);
       const { data, error } = await supabase
         .from('steps')
         .select('*')
@@ -53,9 +54,11 @@ const StepList: React.FC<StepListProps> = ({ phaseId, projectId, onStepStatusCha
         .order('order_index', { ascending: true });
 
       if (error) {
+        console.error(`[StepList] Failed to load steps for phaseId ${phaseId}:`, error);
         showError(`Failed to load steps: ${error.message}`);
         setSteps([]);
       } else {
+        console.log(`[StepList] Steps loaded for phaseId ${phaseId}:`, data);
         setSteps(data || []);
       }
       setIsLoading(false);
@@ -77,8 +80,7 @@ const StepList: React.FC<StepListProps> = ({ phaseId, projectId, onStepStatusCha
           filter: `phase_id=eq.${phaseId}`,
         },
         (payload) => {
-          // Re-fetch steps or update state based on payload
-          // For simplicity, re-fetching all steps for the phase
+          console.log(`[StepList] Realtime update for phaseId ${phaseId}:`, payload);
           fetchSteps();
           onStepStatusChange(); // Notify parent (PhaseCard) to recalculate progress
         }
@@ -86,6 +88,7 @@ const StepList: React.FC<StepListProps> = ({ phaseId, projectId, onStepStatusCha
       .subscribe();
 
     return () => {
+      console.log(`[StepList] Unsubscribing from channel steps_for_phase_${phaseId}`);
       supabase.removeChannel(channel);
     };
   }, [phaseId, onStepStatusChange]);

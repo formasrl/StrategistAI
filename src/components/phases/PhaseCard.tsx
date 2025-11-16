@@ -3,7 +3,7 @@ import { Phase } from '@/types/supabase';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { ChevronDown, ChevronRight } from 'lucide-react'; // Changed ChevronUp to ChevronRight
 import { Progress } from '@/components/ui/progress';
 import StepList from '@/components/steps/StepList';
 import { Badge } from '@/components/ui/badge';
@@ -108,7 +108,7 @@ const PhaseCard: React.FC<PhaseCardProps> = ({ phase, projectId, onPhaseUpdated 
               {getStatusBadge(currentPhase.status)}
               <CollapsibleTrigger asChild>
                 <Button variant="ghost" size="sm">
-                  {isCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+                  {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                   <span className="sr-only">Toggle steps</span>
                 </Button>
               </CollapsibleTrigger>
