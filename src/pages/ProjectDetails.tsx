@@ -20,6 +20,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import EditProjectDialog from '@/components/projects/EditProjectDialog'; // Import the new dialog
+import { formatDateTime } from '@/utils/dateUtils'; // New import
 
 const ProjectDetails: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
@@ -146,7 +147,7 @@ const ProjectDetails: React.FC = () => {
           )}
           <div>
             <h3 className="text-xl font-semibold">Created At</h3>
-            <p className="text-muted-foreground">{new Date(project.created_at).toLocaleDateString()}</p>
+            <p className="text-muted-foreground">{formatDateTime(project.created_at, 'MMM d, yyyy')}</p>
           </div>
         </CardContent>
       </Card>

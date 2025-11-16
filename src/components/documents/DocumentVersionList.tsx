@@ -6,8 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ChevronDown, ChevronUp, History, FileText } from 'lucide-react';
-import { format } from 'date-fns';
 import { Skeleton } from '@/components/ui/skeleton';
+import { formatDateTime } from '@/utils/dateUtils'; // New import
 
 interface DocumentVersionListProps {
   documentId: string;
@@ -83,7 +83,7 @@ const DocumentVersionList: React.FC<DocumentVersionListProps> = ({
                       <div>
                         <p className="font-medium text-sm">Version {version.version} {version.version === currentVersionNumber && '(Current)'}</p>
                         <p className="text-xs text-muted-foreground">
-                          {format(new Date(version.created_at), 'MMM d, yyyy HH:mm')}
+                          {formatDateTime(version.created_at, 'MMM d, yyyy HH:mm')}
                         </p>
                         {version.change_description && (
                           <p className="text-xs text-muted-foreground italic">
