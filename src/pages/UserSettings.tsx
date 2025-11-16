@@ -28,6 +28,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Loader2, RefreshCcw } from 'lucide-react';
+import { useTheme } from 'next-themes'; // Import useTheme
 
 const formSchema = z.object({
   openai_api_key: z.string().optional(),
@@ -39,10 +40,11 @@ const formSchema = z.object({
 
 const UserSettings: React.FC = () => {
   const { user, isLoading: isSessionLoading } = useSession();
+  const { setTheme } = useTheme(); // Use the theme hook
   const [isLoadingSettings, setIsLoadingSettings] = useState(true);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
-  const [hasAttemptedModelFetch, setHasAttemptedModelFetch] = useState(false);
+  const [hasFetchedInitialModels, setHasFetchedInitialModels] = useState(false); // Track if models were fetched on initial load
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -61,14 +63,13 @@ const UserSettings: React.FC = () => {
   const fetchOpenAIModels = useCallback(async (apiKey: string) => {
     if (!apiKey) {
       setAvailableModels([]);
-      setHasAttemptedModelFetch(false);
       showError('Please provide an OpenAI API key to fetch models.');
       return;
     }
 
     setIsLoadingModels(true);
-    setAvailableModels([]);
-    setHasAttemptedModelFetch(true);
+    setAvailableModels([]); // Clear previous models
+    setHasFetchedInitialModels(true); // Mark that we've attempted to fetch models
 
     try {
       const response = await fetch('https://api.openai.com/v1/models', {
@@ -90,6 +91,7 @@ const UserSettings: React.FC = () => {
         .sort();
 
       setAvailableModels(chatModels);
+      // If the preferred model is no longer available, or none is set, default to the first available or gpt-4o
       if (form.getValues('preferred_model') && !chatModels.includes(form.getValues('preferred_model'))) {
         form.setValue('preferred_model', chatModels.length > 0 ? chatModels[0] : 'gpt-4o');
       } else if (!form.getValues('preferred_model') && chatModels.length > 0) {
@@ -99,14 +101,14 @@ const UserSettings: React.FC = () => {
     } catch (error: any) {
       showError(`Error fetching OpenAI models: ${error.message}`);
       setAvailableModels([]);
-      form.setValue('preferred_model', 'gpt-4o');
+      form.setValue('preferred_model', 'gpt-4o'); // Fallback to default
     } finally {
       setIsLoadingModels(false);
     }
   }, [form]);
 
 
-  // Effect to fetch user settings from Supabase
+  // Effect to fetch user settings from Supabase on initial load
   useEffect(() => {
     const fetchSettings = async () => {
       if (!user) {
@@ -128,13 +130,10 @@ const UserSettings: React.FC = () => {
           openai_api_key: data.openai_api_key || '',
           preferred_model: data.preferred_model || 'gpt-4o',
           ai_enabled: data.ai_enabled ?? true,
-          theme: (data.theme as 'light' | 'dark') || 'light', // Set theme from fetched data
-          timezone: data.timezone || 'UTC', // Set timezone from fetched data
+          theme: (data.theme as 'light' | 'dark') || 'light',
+          timezone: data.timezone || 'UTC',
         });
-        // If an API key is present in settings, attempt to fetch models once on initial load
-        if (data.openai_api_key && !hasAttemptedModelFetch) {
-          fetchOpenAIModels(data.openai_api_key);
-        }
+        // Do NOT automatically fetch models here. Only on button press.
       }
       setIsLoadingSettings(false);
     };
@@ -142,7 +141,7 @@ const UserSettings: React.FC = () => {
     if (!isSessionLoading) {
       fetchSettings();
     }
-  }, [user, isSessionLoading, form, fetchOpenAIModels, hasAttemptedModelFetch]);
+  }, [user, isSessionLoading, form]); // Removed fetchOpenAIModels from dependencies
 
   const onSubmit = async (values: z.infer<typeof formSchema>) => {
     if (!user) {
@@ -158,8 +157,8 @@ const UserSettings: React.FC = () => {
           openai_api_key: values.openai_api_key || null,
           preferred_model: values.preferred_model || null,
           ai_enabled: values.ai_enabled,
-          theme: values.theme, // Save theme
-          timezone: values.timezone, // Save timezone
+          theme: values.theme,
+          timezone: values.timezone,
           updated_at: new Date().toISOString(),
         },
         { onConflict: 'user_id' }
@@ -169,8 +168,10 @@ const UserSettings: React.FC = () => {
       showError(`Failed to save settings: ${error.message}`);
     } else {
       showSuccess('Settings saved successfully!');
+      // Apply theme immediately after saving
+      setTheme(values.theme);
       // If API key was just updated, trigger model fetch
-      if (values.openai_api_key && values.openai_api_key !== openaiApiKey) {
+      if (values.openai_api_key && values.openai_api_key !== openaiApiKey && !hasFetchedInitialModels) {
         fetchOpenAIModels(values.openai_api_key);
       }
     }
@@ -179,7 +180,7 @@ const UserSettings: React.FC = () => {
   if (isSessionLoading || isLoadingSettings) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-white">
-        <p className="text-xl">Loading AI Settings...</p>
+        <p className="text-xl">Loading Settings...</p>
       </div>
     );
   }
@@ -268,6 +269,12 @@ const UserSettings: React.FC = () => {
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
+                      {/* Always show the current value, even if availableModels is empty */}
+                      {!availableModels.includes(field.value || '') && field.value && (
+                         <SelectItem value={field.value} className="italic">
+                           {field.value} (Current)
+                         </SelectItem>
+                      )}
                       {availableModels.length > 0 ? (
                         availableModels.map((model) => (
                           <SelectItem key={model} value={model}>
@@ -275,9 +282,12 @@ const UserSettings: React.FC = () => {
                           </SelectItem>
                         ))
                       ) : (
-                        <SelectItem value="gpt-4o" disabled={!!openaiApiKey}>
-                          GPT-4o (Default)
-                        </SelectItem>
+                        // Only show default if no API key is provided or models haven't been fetched
+                        !openaiApiKey && !hasFetchedInitialModels && (
+                          <SelectItem value="gpt-4o">
+                            GPT-4o (Default)
+                          </SelectItem>
+                        )
                       )}
                     </SelectContent>
                   </Select>

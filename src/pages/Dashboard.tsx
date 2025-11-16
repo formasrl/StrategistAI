@@ -126,7 +126,7 @@ const Dashboard = () => {
               <UserCircle2 className="mr-2 h-4 w-4" /> Profile
             </Button>
             <Button onClick={() => navigate('/dashboard/settings')} className="w-full" variant="ghost">
-              <Settings className="mr-2 h-4 w-4" /> AI Settings
+              <Settings className="mr-2 h-4 w-4" /> Settings
             </Button>
             <Button onClick={handleLogout} variant="destructive" className="w-full">
               <LogOut className="mr-2 h-4 w-4" /> Logout
