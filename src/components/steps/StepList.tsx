@@ -2,15 +2,15 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Step } from '@/types/supabase';
 import { showError } from '@/utils/toast';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { CheckCircle2, CircleDot, CircleDashed } from 'lucide-react';
 
 interface StepListProps {
   phaseId: string;
-  projectId: string; // Passed for potential future routing or context
-  onStepStatusChange: () => void; // Callback for when a step's status changes (e.g., to update phase progress)
+  projectId: string;
+  onStepStatusChange: () => void;
 }
 
 const getStatusIcon = (status: Step['status']) => {
@@ -29,17 +29,17 @@ const getStatusIcon = (status: Step['status']) => {
 const getStatusBadgeVariant = (status: Step['status']) => {
   switch (status) {
     case 'complete':
-      return 'default'; // Green by default
+      return 'default';
     case 'in_progress':
-      return 'secondary'; // Blue by default
+      return 'secondary';
     case 'not_started':
     case 'locked':
     default:
-      return 'outline'; // Grey by default
+      return 'outline';
   }
 };
 
-const StepList: React.FC<StepListProps> = ({ phaseId, projectId, onStepStatusChange }) => {
+const StepList: React.FC<StepListProps> = ({ phaseId, projectId: _projectId, onStepStatusChange }) => {
   const [steps, setSteps] = useState<Step[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -68,13 +68,12 @@ const StepList: React.FC<StepListProps> = ({ phaseId, projectId, onStepStatusCha
       fetchSteps();
     }
 
-    // Set up real-time subscription for steps in this phase
     const channel = supabase
       .channel(`steps_for_phase_${phaseId}`)
       .on(
         'postgres_changes',
         {
-          event: '*', // Listen to INSERT, UPDATE, DELETE
+          event: '*',
           schema: 'public',
           table: 'steps',
           filter: `phase_id=eq.${phaseId}`,
@@ -82,7 +81,7 @@ const StepList: React.FC<StepListProps> = ({ phaseId, projectId, onStepStatusCha
         (payload) => {
           console.log(`[StepList] Realtime update for phaseId ${phaseId}:`, payload);
           fetchSteps();
-          onStepStatusChange(); // Notify parent (PhaseCard) to recalculate progress
+          onStepStatusChange();
         }
       )
       .subscribe();
@@ -127,7 +126,6 @@ const StepList: React.FC<StepListProps> = ({ phaseId, projectId, onStepStatusCha
               {step.description}
             </CardContent>
           )}
-          {/* Future: Add buttons to interact with step, e.g., mark complete, view guide */}
         </Card>
       ))}
     </div>

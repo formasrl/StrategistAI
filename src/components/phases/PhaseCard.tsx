@@ -3,7 +3,7 @@ import { Phase } from '@/types/supabase';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { ChevronDown, ChevronRight } from 'lucide-react'; // Changed ChevronUp to ChevronRight
+import { ChevronDown, ChevronLeft } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import StepList from '@/components/steps/StepList';
 import { Badge } from '@/components/ui/badge';
@@ -13,7 +13,7 @@ import { showError } from '@/utils/toast';
 interface PhaseCardProps {
   phase: Phase;
   projectId: string;
-  onPhaseUpdated: () => void; // Callback to notify parent (PhaseList) when phase data changes
+  onPhaseUpdated: () => void;
 }
 
 const getStatusBadge = (status: Phase['status']) => {
@@ -30,7 +30,7 @@ const getStatusBadge = (status: Phase['status']) => {
 };
 
 const PhaseCard: React.FC<PhaseCardProps> = ({ phase, projectId, onPhaseUpdated }) => {
-  const [isCollapsed, setIsCollapsed] = useState(true);
+  const [isOpen, setIsOpen] = useState(false);
   const [currentPhase, setCurrentPhase] = useState<Phase>(phase);
 
   const calculatePhaseProgress = useCallback(async () => {
@@ -62,7 +62,6 @@ const PhaseCard: React.FC<PhaseCardProps> = ({ phase, projectId, onPhaseUpdated 
       newStatus = 'in_progress';
     }
 
-    // Only update if there's a change to avoid unnecessary re-renders/updates
     if (newCompletionPercentage !== currentPhase.completion_percentage || newStatus !== currentPhase.status) {
       const { error: updateError } = await supabase
         .from('phases')
@@ -81,24 +80,26 @@ const PhaseCard: React.FC<PhaseCardProps> = ({ phase, projectId, onPhaseUpdated 
           completion_percentage: newCompletionPercentage,
           status: newStatus,
         }));
-        onPhaseUpdated(); // Notify parent (PhaseList) that this phase has been updated
+        onPhaseUpdated();
       }
     }
   }, [currentPhase, onPhaseUpdated]);
 
   useEffect(() => {
-    // Recalculate progress when the phase prop changes (e.g., initial load or parent re-fetches)
     setCurrentPhase(phase);
+  }, [phase]);
+
+  useEffect(() => {
     calculatePhaseProgress();
-  }, [phase, calculatePhaseProgress]);
+  }, [calculatePhaseProgress]);
 
   const handleStepContentChange = () => {
-    calculatePhaseProgress(); // Recalculate when a step is created or its status changes
+    calculatePhaseProgress();
   };
 
   return (
     <Card className="mb-4">
-      <Collapsible open={!isCollapsed} onOpenChange={setIsCollapsed}>
+      <Collapsible open={isOpen} onOpenChange={setIsOpen}>
         <CardHeader className="p-4 pb-2">
           <div className="flex items-center justify-between">
             <CardTitle className="text-xl font-bold flex items-center gap-2">
@@ -107,8 +108,12 @@ const PhaseCard: React.FC<PhaseCardProps> = ({ phase, projectId, onPhaseUpdated 
             <div className="flex items-center gap-2">
               {getStatusBadge(currentPhase.status)}
               <CollapsibleTrigger asChild>
-                <Button variant="ghost" size="sm">
-                  {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                <Button variant="ghost" size="sm" className="p-2">
+                  {isOpen ? (
+                    <ChevronDown className="h-4 w-4 transition-transform duration-200" />
+                  ) : (
+                    <ChevronLeft className="h-4 w-4 transition-transform duration-200" />
+                  )}
                   <span className="sr-only">Toggle steps</span>
                 </Button>
               </CollapsibleTrigger>
