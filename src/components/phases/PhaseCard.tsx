@@ -3,11 +3,9 @@ import { Phase } from '@/types/supabase';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { ChevronDown, ChevronUp } from 'lucide-react'; // Removed PlusCircle, Edit icons
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import StepList from '@/components/steps/StepList';
-// import CreateStepDialog from '@/components/steps/CreateStepDialog'; // Removed as no longer needed
-// import EditPhaseDialog from './EditPhaseDialog'; // Removed as no longer needed
 import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/integrations/supabase/client';
 import { showError } from '@/utils/toast';
@@ -33,8 +31,6 @@ const getStatusBadge = (status: Phase['status']) => {
 
 const PhaseCard: React.FC<PhaseCardProps> = ({ phase, projectId, onPhaseUpdated }) => {
   const [isCollapsed, setIsCollapsed] = useState(true);
-  // const [isCreateStepDialogOpen, setIsCreateStepDialogOpen] = useState(false); // Removed as no longer needed
-  // const [isEditPhaseDialogOpen, setIsEditPhaseDialogOpen] = useState(false); // Removed as no longer needed
   const [currentPhase, setCurrentPhase] = useState<Phase>(phase);
 
   const calculatePhaseProgress = useCallback(async () => {
@@ -100,19 +96,16 @@ const PhaseCard: React.FC<PhaseCardProps> = ({ phase, projectId, onPhaseUpdated 
     calculatePhaseProgress(); // Recalculate when a step is created or its status changes
   };
 
-  // Removed handlePhaseEdit and handlePhaseUpdated as edit functionality is removed
-
   return (
     <Card className="mb-4">
-      <CardHeader className="p-4 pb-2">
-        <Collapsible open={!isCollapsed} onOpenChange={setIsCollapsed}>
+      <Collapsible open={!isCollapsed} onOpenChange={setIsCollapsed}>
+        <CardHeader className="p-4 pb-2">
           <div className="flex items-center justify-between">
             <CardTitle className="text-xl font-bold flex items-center gap-2">
               <span className="text-muted-foreground">{currentPhase.phase_number}.</span> {currentPhase.phase_name}
             </CardTitle>
             <div className="flex items-center gap-2">
               {getStatusBadge(currentPhase.status)}
-              {/* Removed Edit button */}
               <CollapsibleTrigger asChild>
                 <Button variant="ghost" size="sm">
                   {isCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
@@ -132,19 +125,16 @@ const PhaseCard: React.FC<PhaseCardProps> = ({ phase, projectId, onPhaseUpdated 
               {currentPhase.completion_percentage}% Complete
             </span>
           </CardDescription>
-          <CollapsibleContent className="mt-4">
-            <div className="border-t border-border pt-4">
-              <div className="flex justify-between items-center mb-3">
-                <h4 className="text-lg font-semibold">Steps</h4>
-                {/* Removed "Add Step" button */}
-              </div>
-              <StepList phaseId={currentPhase.id} projectId={projectId} onStepStatusChange={handleStepContentChange} />
+        </CardHeader>
+        <CollapsibleContent>
+          <CardContent className="border-t border-border pt-4">
+            <div className="flex justify-between items-center mb-3">
+              <h4 className="text-lg font-semibold">Steps</h4>
             </div>
-          </CollapsibleContent>
-        </Collapsible>
-      </CardHeader>
-      {/* Removed CreateStepDialog */}
-      {/* Removed EditPhaseDialog */}
+            <StepList phaseId={currentPhase.id} projectId={projectId} onStepStatusChange={handleStepContentChange} />
+          </CardContent>
+        </CollapsibleContent>
+      </Collapsible>
     </Card>
   );
 };
