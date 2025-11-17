@@ -1,9 +1,9 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { useParams, useNavigate, useOutletContext } from 'react-router-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Document, AiReview } from '@/types/supabase';
 import { showError, showSuccess } from '@/utils/toast';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import DocumentVersionList from '@/components/documents/DocumentVersionList';
 import DocumentHeader from '@/components/documents/DocumentHeader';
@@ -11,6 +11,11 @@ import DocumentToolbar from '@/components/documents/DocumentToolbar';
 
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
+
+import mammoth from 'mammoth';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
+import { FileUp, Loader2 } from 'lucide-react'; // Import FileUp icon
 
 type DashboardOutletContext = {
   setAiReview?: (review: AiReview | null) => void;
@@ -90,6 +95,7 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
   const [isPublishing, setIsPublishing] = useState(false);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isUploadingFile, setIsUploadingFile] = useState(false); // New state for file upload
 
   const [viewingVersionContent, setViewingVersionContent] = useState<string | null>(null);
   const [viewingVersionNumber, setViewingVersionNumber] = useState<number | null>(null);
@@ -97,41 +103,13 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
   const isPublished = status === ('published' as Document['status']);
   const isHistoricalView = viewingVersionContent !== null;
 
+  const quillRef = useRef<ReactQuill>(null); // Ref for ReactQuill instance
+  const fileInputRef = useRef<HTMLInputElement>(null); // Ref for hidden file input
+
   const versionLabel = useMemo(() => {
     const versionToDisplay = viewingVersionNumber ?? document?.current_version ?? '—';
     return `Version: ${versionToDisplay}`;
   }, [viewingVersionNumber, document?.current_version]);
-
-  const modules = useMemo(
-    () => ({
-      toolbar: [
-        [{ header: [1, 2, false] }],
-        ['bold', 'italic', 'underline', 'strike', 'blockquote'],
-        [{ list: 'ordered' }, { list: 'bullet' }],
-        [{ indent: '-1' }, { indent: '+1' }],
-        ['link', 'image'],
-        ['clean'],
-      ],
-    }),
-    [],
-  );
-
-  const formats = useMemo(
-    () => [
-      'header',
-      'bold',
-      'italic',
-      'underline',
-      'strike',
-      'blockquote',
-      'list',
-      'bullet',
-      'indent',
-      'link',
-      'image',
-    ],
-    [],
-  );
 
   const syncDocumentMemory = useCallback(
     async (action: 'publish' | 'disconnect'): Promise<{ ok: boolean; message?: string }> => {
@@ -348,6 +326,108 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
     showSuccess('Switched back to the latest document version.');
   };
 
+  // File upload logic
+  const handleUploadFileButtonClick = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
+  };
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (isPublished || isHistoricalView) {
+      showError('Cannot upload files when the document is published or viewing a historical version.');
+      return;
+    }
+
+    setIsUploadingFile(true);
+    const reader = new FileReader();
+    let contentHtml = '';
+
+    try {
+      const fileExtension = file.name.split('.').pop()?.toLowerCase();
+
+      if (fileExtension === 'docx') {
+        const arrayBuffer = await file.arrayBuffer();
+        const result = await mammoth.convertToHtml({ arrayBuffer });
+        contentHtml = result.value;
+      } else if (fileExtension === 'html') {
+        contentHtml = await new Promise<string>((resolve) => {
+          reader.onload = (e) => resolve(e.target?.result as string);
+          reader.readAsText(file);
+        });
+      } else if (fileExtension === 'md') {
+        const markdownText = await new Promise<string>((resolve) => {
+          reader.onload = (e) => resolve(e.target?.result as string);
+          reader.readAsText(file);
+        });
+        contentHtml = marked.parse(markdownText);
+      } else {
+        showError('Unsupported file type. Please upload .docx, .html, or .md files.');
+        return;
+      }
+
+      // Sanitize HTML before inserting
+      const sanitizedHtml = DOMPurify.sanitize(contentHtml);
+
+      if (quillRef.current) {
+        const quill = quillRef.current.getEditor();
+        const range = quill.getSelection(true);
+        quill.clipboard.dangerouslyPasteHTML(range.index, sanitizedHtml);
+        quill.setSelection(range.index + sanitizedHtml.length, 0); // Move cursor after inserted content
+        setContent(quill.root.innerHTML); // Update local state with new content
+        showSuccess('File content inserted successfully!');
+      }
+    } catch (error: any) {
+      console.error('File upload error:', error);
+      showError(`Failed to process file: ${error.message}`);
+    } finally {
+      setIsUploadingFile(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''; // Clear the file input
+      }
+    }
+  };
+
+  const modules = useMemo(
+    () => ({
+      toolbar: {
+        container: [
+          [{ header: [1, 2, false] }],
+          ['bold', 'italic', 'underline', 'strike', 'blockquote'],
+          [{ list: 'ordered' }, { list: 'bullet' }],
+          [{ indent: '-1' }, { indent: '+1' }],
+          ['link', 'image', 'uploadFile'], // Add 'uploadFile' here
+          ['clean'],
+        ],
+        handlers: {
+          uploadFile: handleUploadFileButtonClick, // Custom handler
+        },
+      },
+    }),
+    [handleUploadFileButtonClick],
+  );
+
+  const formats = useMemo(
+    () => [
+      'header',
+      'bold',
+      'italic',
+      'underline',
+      'strike',
+      'blockquote',
+      'list',
+      'bullet',
+      'indent',
+      'link',
+      'image',
+      'uploadFile', // Add custom format here
+    ],
+    [],
+  );
+
   if (isLoadingDocument) {
     return (
       <Card className="w-full h-full flex flex-col">
@@ -370,11 +450,11 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
     );
   }
 
-  const disableSave = isSaving || isPublished || isHistoricalView;
+  const disableSave = isSaving || isPublished || isHistoricalView || isUploadingFile;
   const disablePublishDisconnect = isPublished
-    ? isDisconnecting || isHistoricalView
-    : isPublishing || isSaving || isHistoricalView;
-  const disableDelete = isDeleting || isHistoricalView;
+    ? isDisconnecting || isHistoricalView || isUploadingFile
+    : isPublishing || isSaving || isHistoricalView || isUploadingFile;
+  const disableDelete = isDeleting || isHistoricalView || isUploadingFile;
   const showPublishedBanner = isPublished && !isHistoricalView;
 
   return (
@@ -410,15 +490,28 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
               This document is published to RAG and locked for edits. Use “Disconnect” to make changes again.
             </div>
           )}
+          {isUploadingFile && (
+            <div className="flex items-center justify-center p-4 text-muted-foreground">
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Processing file...
+            </div>
+          )}
           <ReactQuill
+            ref={quillRef}
             theme="snow"
             value={isHistoricalView ? viewingVersionContent ?? '' : content}
             onChange={setContent}
             modules={modules}
             formats={formats}
-            readOnly={isHistoricalView || isPublished}
+            readOnly={isHistoricalView || isPublished || isUploadingFile}
             placeholder="Start writing your document here..."
             className="flex-1 min-h-[300px] flex flex-col"
+          />
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileChange}
+            style={{ display: 'none' }}
+            accept=".docx,.html,.md"
           />
         </CardContent>
       </Card>
