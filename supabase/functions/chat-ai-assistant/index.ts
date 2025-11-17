@@ -7,7 +7,7 @@ const corsHeaders = {
 };
 
 const CHAT_MODEL = Deno.env.get("STRATEGIST_CHAT_MODEL") ?? "gpt-4o-mini";
-const EMBEDDING_MODEL = Deno.env.get("STRATEGIST_EMBEDDING_MODEL") ?? "text-embedding-3-small";
+const EMBEDDING_MODEL = Deno.env.get("STRATEGIST_EMBEDDING_MODEL") ?? "text-embedding-3-small"; // Still needed for createQueryEmbedding if used elsewhere, but not directly here for memory retrieval
 
 interface ProjectRecord {
   id: string;
@@ -17,6 +17,7 @@ interface ProjectRecord {
   audience: string | null;
   positioning: string | null;
   constraints: string | null;
+  project_profile: string | null; // Added project_profile
 }
 
 interface StepRecord {
@@ -31,13 +32,12 @@ interface StepRecord {
   } | null;
 }
 
+// Updated MemoryMatch interface to match the output of retrieve-relevant-decisions Edge Function
 interface MemoryMatch {
-  document_id: string;
-  step_id: string | null;
-  title: string;
+  step_name: string;
+  document_name: string;
   summary: string;
   key_decisions: string[] | null;
-  tags: string[] | null;
   distance: number;
 }
 
@@ -79,7 +79,7 @@ serve(async (req) => {
 
     const { data: projectData, error: projectError } = await supabaseClient
       .from("projects")
-      .select("id, user_id, name, one_liner, audience, positioning, constraints")
+      .select("id, user_id, name, one_liner, audience, positioning, constraints, project_profile") // Fetch project_profile
       .eq("id", projectId)
       .maybeSingle();
 
@@ -94,7 +94,8 @@ serve(async (req) => {
       return respond({ error: openAIKeyResult.error }, openAIKeyResult.status ?? 400);
     }
 
-    const profileText = await fetchProjectProfileText(supabaseClient, project);
+    // Fetch project profile text (now directly from project.project_profile)
+    const projectProfileText = fetchProjectProfileText(project);
 
     const { data: stepData, error: stepError } = await supabaseClient
       .from("steps")
@@ -107,6 +108,7 @@ serve(async (req) => {
     }
 
     const step = stepData as StepRecord;
+    const stepDefinition = formatStepDefinition(step);
 
     let documentContent = "";
     let documentSummary: string | undefined;
@@ -122,29 +124,49 @@ serve(async (req) => {
         documentSummary = typeof documentData.summary === "string" ? documentData.summary : undefined;
       }
     }
-
-    const embeddingVector = await createQueryEmbedding(openAIKeyResult.key, buildEmbeddingPrompt(message, step));
-    const memoryMatches = await retrieveMemories(supabaseClient, projectId, embeddingVector);
-
     const draftedContext = buildDraftSegment(documentContent, documentSummary);
+
+    // Call retrieve-relevant-decisions Edge Function
+    const { data: relevantDecisionsData, error: relevantDecisionsError } = await supabaseClient.functions.invoke('retrieve-relevant-decisions', {
+      body: { projectId, queryText: message },
+      headers: {
+        Authorization: authHeader,
+      },
+    });
+
+    let memoryMatches: MemoryMatch[] = [];
+    if (relevantDecisionsError) {
+      console.error("Error invoking retrieve-relevant-decisions:", relevantDecisionsError);
+      // Proceed with empty memories if there's an error
+    } else if (relevantDecisionsData?.results) {
+      memoryMatches = relevantDecisionsData.results as MemoryMatch[];
+    }
     const memoriesText = formatMemories(memoryMatches);
+
     const conversationSnippet = formatRecentConversation(recentMessages ?? []);
-    const stepDefinition = formatStepDefinition(step);
 
-    const userPromptSections = [
-      `PROJECT PROFILE:\n${profileText}`,
-      `CURRENT STEP:\n${stepDefinition}`,
-      `RELEVANT PAST DECISIONS:\n${memoriesText}`,
-    ];
+    const userPromptSections = [];
 
+    // Layer 1: Project Profile
+    userPromptSections.push(`PROJECT PROFILE:\n${projectProfileText}`);
+
+    // Layer 2: Current Step Info
+    userPromptSections.push(`CURRENT STEP:\n${stepDefinition}`);
+
+    // Layer 3: Retrieved Decisions Summary + Key Points
+    userPromptSections.push(`RELEVANT PAST DECISIONS:\n${memoriesText}`);
+
+    // Optional: Recent Conversation
     if (conversationSnippet) {
       userPromptSections.push(`RECENT CONVERSATION:\n${conversationSnippet}`);
     }
 
+    // Optional: Current Draft Context
     if (draftedContext) {
       userPromptSections.push(draftedContext);
     }
 
+    // Layer 4: User Question
     userPromptSections.push(`USER QUESTION:\n${message}`);
 
     const systemPrompt = [
@@ -186,12 +208,11 @@ serve(async (req) => {
 
     return respond({
       response: reply,
-      memories: memoryMatches.map((memory) => ({
-        documentId: memory.document_id,
-        title: memory.title,
+      memories: memoryMatches.map((memory) => ({ // Map to a simpler structure for client if needed
+        documentName: memory.document_name,
+        stepName: memory.step_name,
         summary: memory.summary,
         keyDecisions: memory.key_decisions ?? [],
-        tags: memory.tags ?? [],
       })),
     });
   } catch (error) {
@@ -236,18 +257,10 @@ async function resolveOpenAIApiKey(
   return { ok: true, key };
 }
 
-async function fetchProjectProfileText(
-  client: ReturnType<typeof createClient>,
-  project: ProjectRecord
-): Promise<string> {
-  const { data: profile } = await client
-    .from("project_profiles")
-    .select("compressed_text")
-    .eq("project_id", project.id)
-    .maybeSingle();
-
-  if (profile?.compressed_text) {
-    return profile.compressed_text;
+// Updated to use project.project_profile directly
+function fetchProjectProfileText(project: ProjectRecord): string {
+  if (project.project_profile && project.project_profile.trim()) {
+    return project.project_profile;
   }
 
   return [
@@ -262,69 +275,11 @@ async function fetchProjectProfileText(
   ].join("\n");
 }
 
-async function createQueryEmbedding(apiKey: string, text: string): Promise<number[]> {
-  const response = await fetch("https://api.openai.com/v1/embeddings", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: EMBEDDING_MODEL,
-      input: text,
-    }),
-  });
+// Removed createQueryEmbedding as retrieve-relevant-decisions handles it
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error("Embedding error", errorText);
-    throw new Error("Failed to generate embedding.");
-  }
+// Removed retrieveMemories as we are now invoking retrieve-relevant-decisions Edge Function
 
-  const payload = await response.json();
-  const vector = payload?.data?.[0]?.embedding;
-  if (!Array.isArray(vector)) {
-    throw new Error("Embedding vector missing in response.");
-  }
-
-  return vector.map((value: number) => Number(value));
-}
-
-async function retrieveMemories(
-  client: ReturnType<typeof createClient>,
-  projectId: string,
-  embedding: number[]
-): Promise<MemoryMatch[]> {
-  const { data, error } = await client.rpc("match_project_memories", {
-    input_project_id: projectId,
-    query_embedding: embedding,
-    match_count: 4,
-    similarity_threshold: 1.6,
-  });
-
-  if (error) {
-    console.error("Memory retrieval error", error);
-    return [];
-  }
-
-  if (!Array.isArray(data)) {
-    return [];
-  }
-
-  return data as MemoryMatch[];
-}
-
-function buildEmbeddingPrompt(message: string, step: StepRecord): string {
-  return [
-    message,
-    step.step_name ?? "",
-    step.description ?? "",
-    step.why_matters ?? "",
-  ]
-    .filter(Boolean)
-    .join("\n");
-}
-
+// Updated formatMemories to use the new MemoryMatch structure
 function formatMemories(memories: MemoryMatch[]): string {
   if (!memories.length) {
     return "No relevant published decisions found.";
@@ -339,7 +294,7 @@ function formatMemories(memories: MemoryMatch[]): string {
       const summary = memory.summary.length > 220 ? `${memory.summary.slice(0, 217)}...` : memory.summary;
       const score = convertDistanceToScore(memory.distance);
       return [
-        `${index + 1}. ${memory.title} (relevance ${score})`,
+        `${index + 1}. ${memory.document_name} (Step: ${memory.step_name}) (relevance ${score})`,
         `  Summary: ${summary}`,
         decisionsText,
       ].join("\n");

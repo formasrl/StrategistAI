@@ -17,6 +17,7 @@ interface ProjectRecord {
   audience: string | null;
   positioning: string | null;
   constraints: string | null;
+  project_profile: string | null; // Added project_profile
 }
 
 interface StepRecord {
@@ -102,7 +103,7 @@ serve(async (req) => {
 
     const { data: projectData, error: projectError } = await supabaseClient
       .from("projects")
-      .select("id, user_id, name, one_liner, audience, positioning, constraints")
+      .select("id, user_id, name, one_liner, audience, positioning, constraints, project_profile") // Fetch project_profile
       .eq("id", effectiveProjectId)
       .maybeSingle();
 
@@ -117,7 +118,8 @@ serve(async (req) => {
       return respond({ error: openAIKeyResult.error }, openAIKeyResult.status ?? 400);
     }
 
-    const projectProfile = await fetchProjectProfileText(supabaseClient, project);
+    // Fetch project profile text (now directly from project.project_profile)
+    const projectProfile = fetchProjectProfileText(project);
 
     const { data: stepData, error: stepError } = await supabaseClient
       .from("steps")
@@ -259,18 +261,10 @@ async function resolveOpenAIApiKey(
   return { ok: true, key };
 }
 
-async function fetchProjectProfileText(
-  client: ReturnType<typeof createClient>,
-  project: ProjectRecord
-): Promise<string> {
-  const { data: profile } = await client
-    .from("project_profiles")
-    .select("compressed_text")
-    .eq("project_id", project.id)
-    .maybeSingle();
-
-  if (profile?.compressed_text) {
-    return profile.compressed_text;
+// Updated to use project.project_profile directly
+function fetchProjectProfileText(project: ProjectRecord): string {
+  if (project.project_profile && project.project_profile.trim()) {
+    return project.project_profile;
   }
 
   return [
