@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { stripHtmlTags } from "../utils/htmlStripper.ts"; // New import
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -140,7 +141,7 @@ serve(async (req) => {
       if (documentData.project_id !== projectId || documentData.step_id !== stepId) {
         return respond({ error: "Document does not belong to the provided project or step." }, 403);
       }
-      documentContent = (documentData.content ?? "").toString();
+      documentContent = stripHtmlTags(documentData.content ?? ""); // Strip HTML tags
       documentSummary = typeof documentData.summary === "string" ? documentData.summary : undefined;
     }
     let draftedContext = buildDraftSegment(documentContent, documentSummary);
