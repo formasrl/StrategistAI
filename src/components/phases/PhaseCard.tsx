@@ -101,20 +101,23 @@ const PhaseCard: React.FC<PhaseCardProps> = ({ phase, projectId, onPhaseUpdated 
     <Card className="mb-4">
       <Collapsible open={isOpen} onOpenChange={setIsOpen}>
         <CardHeader className="p-4 pb-2">
-          <CollapsibleTrigger asChild> {/* Wrap the entire header content */}
-            <div className="flex items-center justify-between cursor-pointer"> {/* Add cursor-pointer */}
+          <CollapsibleTrigger asChild>
+            <div className="flex items-center justify-between cursor-pointer">
               <CardTitle className="text-xl font-bold flex items-center gap-2">
                 <span className="text-muted-foreground">{currentPhase.phase_number}.</span> {currentPhase.phase_name}
               </CardTitle>
               <div className="flex items-center gap-2">
                 {getStatusBadge(currentPhase.status)}
-                <Button variant="ghost" size="sm" className="p-2"> {/* Keep button for visual cue */}
-                  {isOpen ? (
-                    <ChevronDown className="h-4 w-4 transition-transform duration-200" />
-                  ) : (
-                    <ChevronLeft className="h-4 w-4 transition-transform duration-200" />
-                  )}
-                  <span className="sr-only">Toggle steps</span>
+                <Button variant="ghost" size="sm" className="p-2">
+                  {/* Wrap children in a span to ensure a single React element child */}
+                  <span>
+                    {isOpen ? (
+                      <ChevronDown className="h-4 w-4 transition-transform duration-200" />
+                    ) : (
+                      <ChevronLeft className="h-4 w-4 transition-transform duration-200" />
+                    )}
+                    <span className="sr-only">Toggle steps</span>
+                  </span>
                 </Button>
               </div>
             </div>
@@ -124,12 +127,13 @@ const PhaseCard: React.FC<PhaseCardProps> = ({ phase, projectId, onPhaseUpdated 
               {currentPhase.description}
             </CardDescription>
           )}
-          <CardDescription className="mt-2">
+          {/* Moved Progress out of CardDescription to fix HTML nesting warning */}
+          <div className="mt-2">
             <Progress value={currentPhase.completion_percentage} className="h-2" />
             <span className="text-sm text-muted-foreground mt-1 block">
               {currentPhase.completion_percentage}% Complete
             </span>
-          </CardDescription>
+          </div>
         </CardHeader>
         <CollapsibleContent>
           <CardContent className="border-t border-border pt-4">
