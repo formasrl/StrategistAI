@@ -125,6 +125,27 @@ serve(async (req) => {
       );
     }
 
+    // --- NEW: Trigger generate-step-embedding after successful summary update ---
+    try {
+      const { error: embeddingError } = await supabaseClient.functions.invoke('generate-step-embedding', {
+        body: {
+          step_document_id: documentData.id,
+          project_id: documentData.project_id,
+        },
+        headers: {
+          Authorization: authHeader, // Pass the original Authorization header
+        },
+      });
+
+      if (embeddingError) {
+        console.error('Failed to trigger generate-step-embedding:', embeddingError);
+        // Log the error but don't fail the summary function, as summary is already done.
+      }
+    } catch (invokeError) {
+      console.error('Unexpected error invoking generate-step-embedding:', invokeError);
+    }
+    // --- END NEW ---
+
     return respond({
       success: true,
       summary,
