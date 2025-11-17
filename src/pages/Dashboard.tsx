@@ -8,24 +8,25 @@ import { showSuccess, showError } from '@/utils/toast';
 import ProjectList from '@/components/projects/ProjectList';
 import { PlusCircle, Settings, LogOut, UserCircle2 } from 'lucide-react';
 import AiPanel from '@/components/ai/AiPanel';
-import { AiReview, Project, Phase, Step, Document } from '@/types/supabase'; // Import types
-import CurrentContextDisplay from '@/components/layout/CurrentContextDisplay'; // New import
+import { AiReview, Project, Phase, Step, Document } from '@/types/supabase';
+import CurrentContextDisplay from '@/components/layout/CurrentContextDisplay';
 
 const Dashboard = () => {
   const { session, isLoading } = useSession();
   const navigate = useNavigate();
-  // Use useParams to get current route parameters
-  const { projectId, documentId, stepId } = useParams<{ projectId?: string; documentId?: string; stepId?: string }>();
+  const { projectId, documentId, stepId } = useParams<{
+    projectId?: string;
+    documentId?: string;
+    stepId?: string;
+  }>();
 
-  // State to manage the documentId and stepId that the AiPanel should focus on
   const [aiPanelDocumentId, setAiPanelDocumentId] = useState<string | undefined>(documentId);
   const [aiPanelStepId, setAiPanelStepId] = useState<string | undefined>(stepId);
-  const [aiPanelPhaseId, setAiPanelPhaseId] = useState<string | undefined>(undefined); // Derived from stepId
+  const [aiPanelPhaseId, setAiPanelPhaseId] = useState<string | undefined>(undefined);
 
   const [activeAiReview, setActiveAiReview] = useState<AiReview | null>(null);
   const [isAiReviewLoading, setIsAiReviewLoading] = useState(false);
 
-  // States for current context display
   const [activeProject, setActiveProject] = useState<Project | null>(null);
   const [activePhase, setActivePhase] = useState<Phase | null>(null);
   const [activeStep, setActiveStep] = useState<Step | null>(null);
@@ -37,13 +38,11 @@ const Dashboard = () => {
     }
   }, [session, isLoading, navigate]);
 
-  // Update aiPanelDocumentId and aiPanelStepId when URL params change
   useEffect(() => {
     setAiPanelDocumentId(documentId);
     setAiPanelStepId(stepId);
   }, [documentId, stepId]);
 
-  // Effect to fetch active context (project, phase, step, document)
   useEffect(() => {
     const fetchActiveContext = async () => {
       setActiveProject(null);
@@ -108,8 +107,6 @@ const Dashboard = () => {
     fetchActiveContext();
   }, [projectId, stepId, documentId]);
 
-
-  // Fetch phaseId if aiPanelStepId is set
   useEffect(() => {
     if (aiPanelStepId) {
       const fetchPhaseId = async () => {
@@ -118,6 +115,7 @@ const Dashboard = () => {
           .select('phase_id')
           .eq('id', aiPanelStepId)
           .single();
+
         if (error) {
           console.error('Error fetching phaseId for AI panel:', error);
           setAiPanelPhaseId(undefined);
@@ -125,13 +123,13 @@ const Dashboard = () => {
           setAiPanelPhaseId(data.phase_id);
         }
       };
+
       fetchPhaseId();
     } else {
       setAiPanelPhaseId(undefined);
     }
   }, [aiPanelStepId]);
 
-  // Function to fetch the latest AI review for a given document
   const fetchLatestAiReview = useCallback(async (docId: string) => {
     setIsAiReviewLoading(true);
     const { data: reviewData, error: reviewError } = await supabase
@@ -151,32 +149,35 @@ const Dashboard = () => {
     } else {
       setActiveAiReview(null);
     }
+
     setIsAiReviewLoading(false);
   }, []);
 
-  // Handle AI review generation from the AI panel
-  const handleGenerateAiReviewFromPanel = useCallback(async (docId: string) => {
-    if (!docId || isAiReviewLoading) return;
+  const handleGenerateAiReviewFromPanel = useCallback(
+    async (docId: string) => {
+      if (!docId || isAiReviewLoading) return;
 
-    setIsAiReviewLoading(true);
-    const { data, error } = await supabase.functions.invoke('generate-ai-review', {
-      body: { documentId: docId },
-      headers: {
-        Authorization: `Bearer ${session?.access_token}`,
-      },
-    });
+      setIsAiReviewLoading(true);
+      const { error } = await supabase.functions.invoke('generate-ai-review', {
+        body: { documentId: docId },
+        headers: {
+          Authorization: `Bearer ${session?.access_token}`,
+        },
+      });
 
-    if (error) {
-      showError(`AI review failed: ${error.message}`);
-      setActiveAiReview(null);
-    } else {
-      showSuccess('AI review generated successfully!');
-      await fetchLatestAiReview(docId);
-    }
-    setIsAiReviewLoading(false);
-  }, [isAiReviewLoading, fetchLatestAiReview, session?.access_token]);
+      if (error) {
+        showError(`AI review failed: ${error.message}`);
+        setActiveAiReview(null);
+      } else {
+        showSuccess('AI review generated successfully!');
+        await fetchLatestAiReview(docId);
+      }
 
-  // Reset AI review state and fetch new review when aiPanelDocumentId changes
+      setIsAiReviewLoading(false);
+    },
+    [isAiReviewLoading, fetchLatestAiReview, session?.access_token]
+  );
+
   useEffect(() => {
     if (aiPanelDocumentId) {
       fetchLatestAiReview(aiPanelDocumentId);
@@ -192,6 +193,7 @@ const Dashboard = () => {
 
   const handleLogout = async () => {
     const { error } = await supabase.auth.signOut();
+
     if (error) {
       showError(`Logout failed: ${error.message}`);
     } else {
@@ -200,21 +202,20 @@ const Dashboard = () => {
     }
   };
 
-  // The context value to be passed to nested routes
   const outletContextValue = {
     setAiReview: setActiveAiReview,
     setIsAiReviewLoading: setIsAiReviewLoading,
-    setDocumentIdForAiPanel: setAiPanelDocumentId, // Pass setter for document ID
-    setStepIdForAiPanel: setAiPanelStepId,       // Pass setter for step ID
-    aiReview: activeAiReview, // Pass current AI review state
-    isAiReviewLoading: isAiReviewLoading, // Pass current AI review loading state
+    setDocumentIdForAiPanel: setAiPanelDocumentId,
+    setStepIdForAiPanel: setAiPanelStepId,
+    aiReview: activeAiReview,
+    isAiReviewLoading,
   };
 
   return (
     <DashboardLayout
       sidebar={
-        <div className="flex flex-col h-full"> {/* Added flex-col and h-full here */}
-          <div className="space-y-4 pb-4"> {/* Top fixed section */}
+        <>
+          <div className="space-y-4 pb-4 shrink-0">
             <h2 className="text-xl font-semibold text-sidebar-foreground">Your Projects</h2>
             <Button onClick={() => navigate('/project/new')} className="w-full" variant="outline">
               <PlusCircle className="mr-2 h-4 w-4" /> Create New Project
@@ -226,10 +227,10 @@ const Dashboard = () => {
               activeDocument={activeDocument}
             />
           </div>
-          <div className="flex-1 overflow-y-auto pr-2"> {/* Scrollable project list */}
+          <div className="flex-1 overflow-y-auto pr-2">
             <ProjectList />
           </div>
-          <div className="pt-4 border-t border-sidebar-border space-y-2"> {/* Bottom fixed section */}
+          <div className="pt-4 border-t border-sidebar-border space-y-2 shrink-0">
             <Button onClick={() => navigate('/dashboard/profile')} className="w-full" variant="ghost">
               <UserCircle2 className="mr-2 h-4 w-4" /> Profile
             </Button>
@@ -240,25 +241,19 @@ const Dashboard = () => {
               <LogOut className="mr-2 h-4 w-4" /> Logout
             </Button>
           </div>
-        </div>
+        </>
       }
-      mainContent={
-        <div className="h-full">
-          <Outlet context={outletContextValue} /> {/* Pass context to nested routes */}
-        </div>
-      }
+      mainContent={<Outlet context={outletContextValue} />}
       aiPanel={
-        <div className="space-y-4 h-full flex flex-col">
-          <AiPanel
-            projectId={projectId}
-            phaseId={aiPanelPhaseId} // Pass derived phaseId
-            stepId={aiPanelStepId}
-            documentId={aiPanelDocumentId}
-            aiReview={activeAiReview}
-            isAiReviewLoading={isAiReviewLoading}
-            onGenerateReview={handleGenerateAiReviewFromPanel}
-          />
-        </div>
+        <AiPanel
+          projectId={projectId}
+          phaseId={aiPanelPhaseId}
+          stepId={aiPanelStepId}
+          documentId={aiPanelDocumentId}
+          aiReview={activeAiReview}
+          isAiReviewLoading={isAiReviewLoading}
+          onGenerateReview={handleGenerateAiReviewFromPanel}
+        />
       }
     />
   );

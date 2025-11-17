@@ -6,12 +6,12 @@ import AiChatbot from './AiChatbot';
 import { AiReview } from '@/types/supabase';
 import { Brain, MessageCircle } from 'lucide-react';
 import AiPanelContent from './AiPanelContent';
-import { ScrollArea } from '@/components/ui/scroll-area'; // Import ScrollArea
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 interface AiPanelProps {
   projectId?: string;
-  phaseId?: string; // Changed from number to string | undefined
-  stepId?: string;  // Changed from number to string | undefined
+  phaseId?: string;
+  stepId?: string;
   documentId?: string;
   aiReview: AiReview | null;
   isAiReviewLoading: boolean;
@@ -28,8 +28,8 @@ const AiPanel: React.FC<AiPanelProps> = ({
   onGenerateReview,
 }) => {
   return (
-    <Tabs defaultValue="chat" className="h-full flex flex-col">
-      <TabsList className="grid w-full grid-cols-2">
+    <Tabs defaultValue="chat" className="flex h-full min-h-0 flex-col">
+      <TabsList className="grid w-full grid-cols-2 shrink-0">
         <TabsTrigger value="chat" className="flex items-center gap-2">
           <MessageCircle className="h-4 w-4" /> Chat
         </TabsTrigger>
@@ -37,16 +37,17 @@ const AiPanel: React.FC<AiPanelProps> = ({
           <Brain className="h-4 w-4" /> Review
         </TabsTrigger>
       </TabsList>
-      <TabsContent value="chat" className="flex-1 mt-0 data-[state=inactive]:hidden">
-        <AiChatbot
-          projectId={projectId}
-          phaseId={phaseId}
-          stepId={stepId}
-          documentId={documentId}
-        />
+      <TabsContent
+        value="chat"
+        className="mt-0 flex h-full min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden"
+      >
+        <AiChatbot projectId={projectId} phaseId={phaseId} stepId={stepId} documentId={documentId} />
       </TabsContent>
-      <TabsContent value="review" className="flex-1 mt-0 data-[state=inactive]:hidden">
-        <ScrollArea className="h-full pr-2"> {/* Wrap AiPanelContent in ScrollArea */}
+      <TabsContent
+        value="review"
+        className="mt-0 flex h-full min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden"
+      >
+        <ScrollArea className="flex-1 pr-2">
           <AiPanelContent
             documentId={documentId}
             aiReview={aiReview}
