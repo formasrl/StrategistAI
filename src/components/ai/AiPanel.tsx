@@ -6,6 +6,7 @@ import AiChatbot from './AiChatbot';
 import { AiReview } from '@/types/supabase';
 import { Brain, MessageCircle } from 'lucide-react';
 import AiPanelContent from './AiPanelContent';
+import { ScrollArea } from '@/components/ui/scroll-area'; // Import ScrollArea
 
 interface AiPanelProps {
   projectId?: string;
@@ -45,12 +46,14 @@ const AiPanel: React.FC<AiPanelProps> = ({
         />
       </TabsContent>
       <TabsContent value="review" className="flex-1 mt-0 data-[state=inactive]:hidden">
-        <AiPanelContent
-          documentId={documentId}
-          aiReview={aiReview}
-          isAiReviewLoading={isAiReviewLoading}
-          onGenerateReview={onGenerateReview}
-        />
+        <ScrollArea className="h-full pr-2"> {/* Wrap AiPanelContent in ScrollArea */}
+          <AiPanelContent
+            documentId={documentId}
+            aiReview={aiReview}
+            isAiReviewLoading={isAiReviewLoading}
+            onGenerateReview={onGenerateReview}
+          />
+        </ScrollArea>
       </TabsContent>
     </Tabs>
   );

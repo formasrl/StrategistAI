@@ -15,11 +15,11 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ sidebar, mainContent,
   return (
     <ResizablePanelGroup
       direction="horizontal"
-      className="min-h-screen w-full rounded-lg border bg-background text-foreground"
+      className="h-screen w-full rounded-lg border bg-background text-foreground"
     >
       {/* Left Sidebar (Roadmap Navigation) */}
       <ResizablePanel defaultSize={20} minSize={15} maxSize={30} className="hidden md:block">
-        <aside className="h-full p-4 bg-sidebar border-r border-border">
+        <aside className="h-full p-4 bg-sidebar border-r border-border overflow-y-auto">
           {sidebar}
         </aside>
       </ResizablePanel>
@@ -27,7 +27,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ sidebar, mainContent,
 
       {/* Center Content (Document Editor) */}
       <ResizablePanel defaultSize={60} minSize={40}>
-        <main className="h-full p-4">
+        <main className="h-full p-4 overflow-y-auto">
           {mainContent}
         </main>
       </ResizablePanel>
@@ -35,7 +35,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ sidebar, mainContent,
 
       {/* Right Sidebar (AI Panel) */}
       <ResizablePanel defaultSize={20} minSize={15} maxSize={30} className="hidden md:block">
-        <aside className="h-full p-4 bg-sidebar border-l border-border">
+        <aside className="h-full p-4 bg-sidebar border-l border-border overflow-y-auto">
           {aiPanel}
         </aside>
       </ResizablePanel>
