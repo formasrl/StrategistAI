@@ -7,7 +7,7 @@ const corsHeaders = {
 };
 
 const CHAT_MODEL = Deno.env.get("STRATEGIST_CHAT_MODEL") ?? "gpt-4o-mini";
-const EMBEDDING_MODEL = Deno.env.get("STRATEGIST_EMBEDDING_MODEL") ?? "text-embedding-3-small"; // Still needed for createQueryEmbedding if used elsewhere, but not directly here for memory retrieval
+const EMBEDDING_MODEL = Deno.env.get("STRATEGIST_EMBEDDING_MODEL") ?? "text-embedding-3-small";
 
 interface ProjectRecord {
   id: string;
@@ -17,7 +17,7 @@ interface ProjectRecord {
   audience: string | null;
   positioning: string | null;
   constraints: string | null;
-  project_profile: string | null; // Added project_profile
+  project_profile: string | null;
 }
 
 interface StepRecord {
@@ -29,17 +29,30 @@ interface StepRecord {
   phases?: {
     phase_name: string | null;
     phase_number: number | null;
-    project_id: string; // Added project_id to phases
+    project_id: string;
   } | null;
 }
 
-// Updated MemoryMatch interface to match the output of retrieve-relevant-decisions Edge Function
 interface MemoryMatch {
   step_name: string;
   document_name: string;
   summary: string;
   key_decisions: string[] | null;
   distance: number;
+}
+
+// Helper to estimate tokens (rough character count / 4)
+function estimateTokens(text: string | null | undefined): number {
+  if (!text) return 0;
+  return Math.ceil(text.length / 4);
+}
+
+// Helper to truncate text to a target token count
+function truncateToTokens(text: string, maxTokens: number): string {
+  if (!text || maxTokens <= 0) return "";
+  const estimatedChars = maxTokens * 4; // Rough estimate
+  if (text.length <= estimatedChars) return text;
+  return `${text.slice(0, estimatedChars - 3)}...`;
 }
 
 serve(async (req) => {
@@ -82,7 +95,7 @@ serve(async (req) => {
     const { data: projectData, error: projectError } = await supabaseClient
       .from("projects")
       .select("id, user_id, name, one_liner, audience, positioning, constraints, project_profile")
-      .eq("id", projectId) // Filter by projectId
+      .eq("id", projectId)
       .maybeSingle();
 
     if (projectError || !projectData) {
@@ -94,48 +107,45 @@ serve(async (req) => {
     if (!openAIKeyResult.ok) {
       return respond({ error: openAIKeyResult.error }, openAIKeyResult.status ?? 400);
     }
-    const projectProfileText = fetchProjectProfileText(project);
+    let projectProfileText = fetchProjectProfileText(project);
 
     // Layer 2: Current Step Info
     const { data: stepData, error: stepError } = await supabaseClient
       .from("steps")
-      .select("id, step_name, description, why_matters, timeline, phases(phase_name, phase_number, project_id)") // Select project_id from phases
-      .eq("id", stepId) // Filter by stepId
+      .select("id, step_name, description, why_matters, timeline, phases(phase_name, phase_number, project_id)")
+      .eq("id", stepId)
       .maybeSingle();
 
     if (stepError || !stepData) {
       return respond({ error: "Step details not found or accessible." }, 404);
     }
-    // Validate step belongs to the project
     if (stepData.phases?.project_id !== projectId) {
       return respond({ error: "Step does not belong to the provided project." }, 403);
     }
     const step = stepData as StepRecord;
-    const stepDefinition = formatStepDefinition(step);
+    let stepDefinition = formatStepDefinition(step);
 
     let documentContent = "";
     let documentSummary: string | undefined;
     if (documentId) {
       const { data: documentData, error: docError } = await supabaseClient
         .from("documents")
-        .select("content, summary, project_id, step_id") // Select project_id and step_id for validation
-        .eq("id", documentId) // Filter by documentId
+        .select("content, summary, project_id, step_id")
+        .eq("id", documentId)
         .maybeSingle();
 
       if (docError || !documentData) {
         return respond({ error: "Document not found or accessible." }, 404);
       }
-      // Validate document belongs to the project and step
       if (documentData.project_id !== projectId || documentData.step_id !== stepId) {
         return respond({ error: "Document does not belong to the provided project or step." }, 403);
       }
       documentContent = (documentData.content ?? "").toString();
       documentSummary = typeof documentData.summary === "string" ? documentData.summary : undefined;
     }
-    const draftedContext = buildDraftSegment(documentContent, documentSummary);
+    let draftedContext = buildDraftSegment(documentContent, documentSummary);
 
     // Layer 3: Retrieved Decisions Summary + Key Points
-    // Call retrieve-relevant-decisions Edge Function, which already filters by projectId
     const { data: relevantDecisionsData, error: relevantDecisionsError } = await supabaseClient.functions.invoke('retrieve-relevant-decisions', {
       body: { projectId, queryText: message },
       headers: {
@@ -146,13 +156,54 @@ serve(async (req) => {
     let memoryMatches: MemoryMatch[] = [];
     if (relevantDecisionsError) {
       console.error("Error invoking retrieve-relevant-decisions:", relevantDecisionsError);
-      // Proceed with empty memories if there's an error
     } else if (relevantDecisionsData?.results) {
       memoryMatches = relevantDecisionsData.results as MemoryMatch[];
     }
-    const memoriesText = formatMemories(memoryMatches);
+    let memoriesText = formatMemories(memoryMatches);
 
-    const conversationSnippet = formatRecentConversation(recentMessages ?? []);
+    let conversationSnippet = formatRecentConversation(recentMessages ?? []);
+
+    // --- Token Budget Safeguard Logic ---
+    const MAX_CORE_CONTEXT_TOKENS = 2000; // Profile + Step + Retrieved Decisions
+    const MAX_TOTAL_CONTEXT_TOKENS = 3000; // All context layers before user question
+
+    let tokensProfile = estimateTokens(projectProfileText);
+    let tokensStep = estimateTokens(stepDefinition);
+    let tokensMemories = estimateTokens(memoriesText);
+
+    // Check 2000 token limit for core context (Profile + Step + Retrieved Decisions)
+    if (tokensProfile + tokensStep + tokensMemories > MAX_CORE_CONTEXT_TOKENS) {
+      // Truncate retrieved decisions to only the top 1 most relevant
+      memoriesText = formatMemories(memoryMatches.slice(0, 1));
+      tokensMemories = estimateTokens(memoriesText);
+    }
+
+    let tokensConversation = estimateTokens(conversationSnippet);
+    let tokensDraft = estimateTokens(draftedContext);
+
+    let currentContextTokens = tokensProfile + tokensStep + tokensMemories + tokensConversation + tokensDraft;
+
+    // Check 3000 token limit for all context layers
+    if (currentContextTokens > MAX_TOTAL_CONTEXT_TOKENS) {
+      const availableTokensAfterCore = MAX_TOTAL_CONTEXT_TOKENS - (tokensProfile + tokensStep + tokensMemories);
+
+      // Prioritize truncating draftedContext first
+      if (availableTokensAfterCore < tokensDraft) {
+        draftedContext = truncateToTokens(draftedContext ?? "", availableTokensAfterCore);
+        tokensDraft = estimateTokens(draftedContext);
+      }
+      currentContextTokens = tokensProfile + tokensStep + tokensMemories + tokensConversation + tokensDraft;
+
+      // If still over, truncate conversationSnippet
+      if (currentContextTokens > MAX_TOTAL_CONTEXT_TOKENS) {
+        const availableTokensAfterDraft = MAX_TOTAL_CONTEXT_TOKENS - (tokensProfile + tokensStep + tokensMemories + tokensDraft);
+        if (availableTokensAfterDraft < tokensConversation) {
+          conversationSnippet = truncateToTokens(conversationSnippet ?? "", availableTokensAfterDraft);
+          tokensConversation = estimateTokens(conversationSnippet);
+        }
+      }
+    }
+    // --- End Token Budget Safeguard Logic ---
 
     const userPromptSections = [];
 
@@ -186,6 +237,9 @@ serve(async (req) => {
       "If information is missing, ask clarifying questions instead of guessing.",
     ].join(" ");
 
+    const finalPrompt = userPromptSections.join("\n\n");
+    console.log(`[chat-ai-assistant] Context layers token count: ${estimateTokens(finalPrompt)}`);
+
     const chatResponse = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -198,7 +252,7 @@ serve(async (req) => {
         max_tokens: 500,
         messages: [
           { role: "system", content: systemPrompt },
-          { role: "user", content: userPromptSections.join("\n\n") },
+          { role: "user", content: finalPrompt },
         ],
       }),
     });
@@ -217,7 +271,7 @@ serve(async (req) => {
 
     return respond({
       response: reply,
-      memories: memoryMatches.map((memory) => ({ // Map to a simpler structure for client if needed
+      memories: memoryMatches.map((memory) => ({
         documentName: memory.document_name,
         stepName: memory.step_name,
         summary: memory.summary,
@@ -266,7 +320,6 @@ async function resolveOpenAIApiKey(
   return { ok: true, key };
 }
 
-// Updated to use project.project_profile directly
 function fetchProjectProfileText(project: ProjectRecord): string {
   if (project.project_profile && project.project_profile.trim()) {
     return project.project_profile;
@@ -284,11 +337,6 @@ function fetchProjectProfileText(project: ProjectRecord): string {
   ].join("\n");
 }
 
-// Removed createQueryEmbedding as retrieve-relevant-decisions handles it
-
-// Removed retrieveMemories as we are now invoking retrieve-relevant-decisions Edge Function
-
-// Updated formatMemories to use the new MemoryMatch structure
 function formatMemories(memories: MemoryMatch[]): string {
   if (!memories.length) {
     return "No relevant published decisions found.";
