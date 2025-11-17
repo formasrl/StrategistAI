@@ -6,9 +6,8 @@ import { showError, showSuccess } from '@/utils/toast';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
-import { Save, Loader2, RotateCcw, Trash2 } from 'lucide-react';
+import { Save, Loader2, RotateCcw, Trash2, UploadCloud, Link2Off } from 'lucide-react';
 import DocumentVersionList from '@/components/documents/DocumentVersionList';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -20,54 +19,105 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
+import { Badge } from '@/components/ui/badge';
 
 import ReactQuill from 'react-quill';
-import 'react-quill/dist/quill.snow.css'; // Import Quill styles
+import 'react-quill/dist/quill.snow.css';
 
-// Define props for when DocumentEditor is rendered directly (e.g., by StepWorkspace)
+type DashboardOutletContext = {
+  setAiReview?: (review: AiReview | null) => void;
+  setIsAiReviewLoading?: (isLoading: boolean) => void;
+  setDocumentIdForAiPanel?: (docId: string | undefined) => void;
+  setStepIdForAiPanel?: (stepId: string | undefined) => void;
+};
+
 interface DocumentEditorProps {
-  projectId?: string; // Make optional for direct route
-  documentId?: string; // Make optional for direct route
-  setAiReview: (review: AiReview | null) => void; // Setter to update parent's AI review state
-  setIsAiReviewLoading: (isLoading: boolean) => void; // Setter to update parent's AI review loading state
-  aiReview: AiReview | null; // Current AI review from parent
-  isAiReviewLoading: boolean; // Current AI review loading state from parent
+  projectId?: string;
+  documentId?: string;
+  setAiReview?: (review: AiReview | null) => void;
+  setIsAiReviewLoading?: (isLoading: boolean) => void;
 }
 
 const DocumentEditor: React.FC<DocumentEditorProps> = ({
   projectId: propProjectId,
   documentId: propDocumentId,
-  setAiReview, // Destructure setters from props
-  setIsAiReviewLoading, // Destructure setters from props
-  aiReview, // Destructure current AI review from props
-  isAiReviewLoading, // Destructure current AI review loading state from props
+  setAiReview: setAiReviewProp,
+  setIsAiReviewLoading: setIsAiReviewLoadingProp,
 }) => {
-  // Use params for routing, or props if rendered directly
   const routeParams = useParams<{ projectId: string; documentId: string }>();
-  const currentProjectId = propProjectId || routeParams.projectId;
-  const currentDocumentId = propDocumentId || routeParams.documentId;
+  const currentProjectId = propProjectId ?? routeParams.projectId;
+  const currentDocumentId = propDocumentId ?? routeParams.documentId;
   const navigate = useNavigate();
+
+  const outletContext = useOutletContext<DashboardOutletContext | undefined>();
+  const {
+    setAiReview: contextSetAiReview,
+    setIsAiReviewLoading: contextSetIsAiReviewLoading,
+    setDocumentIdForAiPanel: contextSetDocumentIdForAiPanel,
+    setStepIdForAiPanel: contextSetStepIdForAiPanel,
+  } = outletContext ?? {};
+
+  const setAiReviewFn = useCallback(
+    (review: AiReview | null) => {
+      if (setAiReviewProp) {
+        setAiReviewProp(review);
+        return;
+      }
+      contextSetAiReview?.(review);
+    },
+    [setAiReviewProp, contextSetAiReview],
+  );
+
+  const setIsAiReviewLoadingFn = useCallback(
+    (value: boolean) => {
+      if (setIsAiReviewLoadingProp) {
+        setIsAiReviewLoadingProp(value);
+        return;
+      }
+      contextSetIsAiReviewLoading?.(value);
+    },
+    [setIsAiReviewLoadingProp, contextSetIsAiReviewLoading],
+  );
+
+  useEffect(() => {
+    contextSetStepIdForAiPanel?.(undefined);
+  }, [contextSetStepIdForAiPanel]);
+
+  useEffect(() => {
+    if (currentDocumentId) {
+      contextSetDocumentIdForAiPanel?.(currentDocumentId);
+    } else {
+      contextSetDocumentIdForAiPanel?.(undefined);
+    }
+    return () => {
+      contextSetDocumentIdForAiPanel?.(undefined);
+    };
+  }, [currentDocumentId, contextSetDocumentIdForAiPanel]);
 
   const [document, setDocument] = useState<Document | null>(null);
   const [isLoadingDocument, setIsLoadingDocument] = useState(true);
   const [content, setContent] = useState<string>('');
-  const [status, setStatus] = useState<Document['status']>('draft');
+  const [status, setStatus] = useState<Document['status']>('draft' as Document['status']);
   const [isSaving, setIsSaving] = useState(false);
+  const [isPublishing, setIsPublishing] = useState(false);
+  const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
   const [viewingVersionContent, setViewingVersionContent] = useState<string | null>(null);
   const [viewingVersionNumber, setViewingVersionNumber] = useState<number | null>(null);
+
+  const isPublished = status === ('published' as Document['status']);
 
   const fetchDocument = useCallback(async () => {
     if (!currentDocumentId) {
       setIsLoadingDocument(false);
       setDocument(null);
       setContent('');
-      setStatus('draft');
+      setStatus('draft' as Document['status']);
       setViewingVersionContent(null);
       setViewingVersionNumber(null);
-      setAiReview(null); // Clear AI review in parent when no document
-      setIsAiReviewLoading(false); // Clear AI loading state in parent
+      setAiReviewFn(null);
+      setIsAiReviewLoadingFn(false);
       return;
     }
 
@@ -82,28 +132,27 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
       showError(`Failed to load document: ${error.message}`);
       setDocument(null);
       setContent('');
-      setStatus('draft');
+      setStatus('draft' as Document['status']);
       setViewingVersionContent(null);
       setViewingVersionNumber(null);
-      setAiReview(null); // Clear AI review in parent on error
-      setIsAiReviewLoading(false); // Clear AI loading state in parent
+      setAiReviewFn(null);
+      setIsAiReviewLoadingFn(false);
     } else {
       setDocument(data);
       setContent(data?.content || '');
-      setStatus(data?.status || 'draft');
+      setStatus((data?.status as Document['status']) || ('draft' as Document['status']));
       setViewingVersionContent(null);
       setViewingVersionNumber(data?.current_version || null);
-      // AI review is now managed by Dashboard, so no need to fetch here
     }
     setIsLoadingDocument(false);
-  }, [currentDocumentId, setAiReview, setIsAiReviewLoading]);
+  }, [currentDocumentId, setAiReviewFn, setIsAiReviewLoadingFn]);
 
   useEffect(() => {
     fetchDocument();
   }, [fetchDocument]);
 
   const handleSave = async () => {
-    if (!document || isSaving) return;
+    if (!document || isSaving || isPublished) return;
 
     setIsSaving(true);
     try {
@@ -134,8 +183,10 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
         throw new Error(`Failed to update document: ${documentUpdateError.message}`);
       }
 
-      showSuccess('Document saved and new version created successfully!');
-      setDocument((prev) => prev ? { ...prev, content: content, current_version: newVersionNumber, status: status } : null);
+      showSuccess('Document saved successfully.');
+      setDocument((prev) =>
+        prev ? { ...prev, content: content, current_version: newVersionNumber, status: status } : null,
+      );
       setViewingVersionContent(null);
       setViewingVersionNumber(newVersionNumber);
     } catch (error: any) {
@@ -143,6 +194,52 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const handlePublish = async () => {
+    if (!document || isPublishing || !!viewingVersionContent || isPublished) return;
+
+    setIsPublishing(true);
+    const { error } = await supabase
+      .from('documents')
+      .update({
+        status: 'published',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', document.id);
+
+    if (error) {
+      showError(`Publish failed: ${error.message}`);
+    } else {
+      const newStatus = 'published' as Document['status'];
+      setStatus(newStatus);
+      setDocument((prev) => (prev ? { ...prev, status: newStatus } : null));
+      showSuccess('Document published. It is now available to RAG and locked for editing.');
+    }
+    setIsPublishing(false);
+  };
+
+  const handleDisconnect = async () => {
+    if (!document || isDisconnecting || !isPublished) return;
+
+    setIsDisconnecting(true);
+    const { error } = await supabase
+      .from('documents')
+      .update({
+        status: 'draft',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', document.id);
+
+    if (error) {
+      showError(`Disconnect failed: ${error.message}`);
+    } else {
+      const newStatus = 'draft' as Document['status'];
+      setStatus(newStatus);
+      setDocument((prev) => (prev ? { ...prev, status: newStatus } : null));
+      showSuccess('Document disconnected from RAG. Editing has been re-enabled.');
+    }
+    setIsDisconnecting(false);
   };
 
   const handleDeleteDocument = async () => {
@@ -160,31 +257,13 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
       }
 
       showSuccess('Document deleted successfully!');
-      setAiReview(null); // Clear AI review in parent
-      setIsAiReviewLoading(false); // Clear AI loading state in parent
-      navigate(`/dashboard/${currentProjectId}`); // Redirect to the project details page
+      setAiReviewFn(null);
+      setIsAiReviewLoadingFn(false);
+      navigate(`/dashboard/${currentProjectId}`);
     } catch (error: any) {
       showError(`Delete failed: ${error.message}`);
     } finally {
       setIsDeleting(false);
-    }
-  };
-
-  const handleStatusChange = async (newStatus: Document['status']) => {
-    if (!document || isSaving || !!viewingVersionContent) return;
-
-    setStatus(newStatus);
-    const { error } = await supabase
-      .from('documents')
-      .update({ status: newStatus, updated_at: new Date().toISOString() })
-      .eq('id', document.id);
-
-    if (error) {
-      showError(`Failed to update document status: ${error.message}`);
-      setStatus(document.status);
-    } else {
-      showSuccess(`Document status updated to "${newStatus.replace('_', ' ')}".`);
-      setDocument((prev) => prev ? { ...prev, status: newStatus } : null);
     }
   };
 
@@ -202,20 +281,27 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
 
   const modules = {
     toolbar: [
-      [{ 'header': [1, 2, false] }],
+      [{ header: [1, 2, false] }],
       ['bold', 'italic', 'underline', 'strike', 'blockquote'],
-      [{ 'list': 'ordered' }, { 'list': 'bullet' }],
-      [{ 'indent': '-1' }, { 'indent': '+1' }],
+      [{ list: 'ordered' }, { list: 'bullet' }],
+      [{ indent: '-1' }, { indent: '+1' }],
       ['link', 'image'],
-      ['clean']
+      ['clean'],
     ],
   };
 
   const formats = [
     'header',
-    'bold', 'italic', 'underline', 'strike', 'blockquote',
-    'list', 'bullet', 'indent',
-    'link', 'image'
+    'bold',
+    'italic',
+    'underline',
+    'strike',
+    'blockquote',
+    'list',
+    'bullet',
+    'indent',
+    'link',
+    'image',
   ];
 
   if (isLoadingDocument) {
@@ -240,43 +326,78 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
     );
   }
 
+  const publishDisconnectDisabled = isPublished
+    ? isDisconnecting || !!viewingVersionContent
+    : isPublishing || isSaving || !!viewingVersionContent;
+
   return (
     <div className="flex flex-col h-full space-y-4">
       <Card className="w-full flex-1 flex flex-col">
-        <CardHeader className="flex flex-row items-center justify-between">
+        <CardHeader className="flex flex-row items-start justify-between">
           <div>
             <CardTitle className="text-2xl font-bold">{document.document_name}</CardTitle>
             <CardDescription className="text-muted-foreground">
               Version: {viewingVersionNumber}
-              {viewingVersionContent && <span className="ml-2 text-yellow-600 dark:text-yellow-400">(Historical View)</span>}
+              {viewingVersionContent && (
+                <span className="ml-2 text-yellow-600 dark:text-yellow-400">(Historical View)</span>
+              )}
             </CardDescription>
+            <div className="mt-2 flex items-center gap-2">
+              <Badge
+                variant={isPublished ? 'secondary' : 'outline'}
+                className={isPublished ? 'bg-emerald-500 text-white hover:bg-emerald-500/80' : ''}
+              >
+                {isPublished ? 'Published to RAG (read-only)' : 'Editable'}
+              </Badge>
+              {!isPublished && (
+                <span className="text-xs text-muted-foreground">Use Publish to surface in RAG.</span>
+              )}
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Select
-              onValueChange={(value: Document['status']) => handleStatusChange(value)}
-              value={status}
-              disabled={!!viewingVersionContent || isSaving}
-            >
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Select Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="draft">Draft</SelectItem>
-                <SelectItem value="in_progress">In Progress</SelectItem>
-                <SelectItem value="in_review">In Review</SelectItem>
-                <SelectItem value="complete">Complete</SelectItem>
-                <SelectItem value="approved">Approved</SelectItem>
-              </SelectContent>
-            </Select>
-
+          <div className="flex flex-wrap items-center gap-2">
             {viewingVersionContent && (
               <Button onClick={handleBackToLatest} variant="outline">
                 <RotateCcw className="mr-2 h-4 w-4" /> Back to Latest
               </Button>
             )}
-            {/* Removed the "Generate AI Review" button from here */}
-            <Button onClick={handleSave} disabled={isSaving || !!viewingVersionContent}>
-              {isSaving ? 'Saving...' : <><Save className="mr-2 h-4 w-4" /> Save Document</>}
+            <Button
+              onClick={handleSave}
+              disabled={isSaving || isPublished || !!viewingVersionContent}
+            >
+              {isSaving ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="mr-2 h-4 w-4" /> Save
+                </>
+              )}
+            </Button>
+            <Button
+              onClick={isPublished ? handleDisconnect : handlePublish}
+              variant={isPublished ? 'outline' : 'secondary'}
+              disabled={publishDisconnectDisabled}
+            >
+              {isPublished ? (
+                isDisconnecting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Disconnecting...
+                  </>
+                ) : (
+                  <>
+                    <Link2Off className="mr-2 h-4 w-4" /> Disconnect
+                  </>
+                )
+              ) : isPublishing ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Publishing...
+                </>
+              ) : (
+                <>
+                  <UploadCloud className="mr-2 h-4 w-4" /> Publish
+                </>
+              )}
             </Button>
             <AlertDialog>
               <AlertDialogTrigger asChild>
@@ -295,7 +416,10 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                   <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction onClick={handleDeleteDocument} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                  <AlertDialogAction
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    onClick={handleDeleteDocument}
+                  >
                     Delete
                   </AlertDialogAction>
                 </AlertDialogFooter>
@@ -304,13 +428,18 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
           </div>
         </CardHeader>
         <CardContent className="flex-1 flex flex-col p-6 pt-0">
+          {isPublished && !viewingVersionContent && (
+            <div className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200">
+              This document is published to RAG and locked for edits. Use “Disconnect” to make changes again.
+            </div>
+          )}
           <ReactQuill
             theme="snow"
             value={viewingVersionContent !== null ? viewingVersionContent : content}
             onChange={setContent}
             modules={modules}
             formats={formats}
-            readOnly={!!viewingVersionContent}
+            readOnly={!!viewingVersionContent || isPublished}
             placeholder="Start writing your document here..."
             className="flex-1 min-h-[300px] flex flex-col"
           />
