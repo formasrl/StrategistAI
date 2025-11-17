@@ -213,21 +213,23 @@ const Dashboard = () => {
   return (
     <DashboardLayout
       sidebar={
-        <div className="space-y-4 flex flex-col h-full">
-          <h2 className="text-xl font-semibold text-sidebar-foreground">Your Projects</h2>
-          <Button onClick={() => navigate('/project/new')} className="w-full" variant="outline">
-            <PlusCircle className="mr-2 h-4 w-4" /> Create New Project
-          </Button>
-          <CurrentContextDisplay
-            activeProject={activeProject}
-            activePhase={activePhase}
-            activeStep={activeStep}
-            activeDocument={activeDocument}
-          />
-          <div className="flex-1 overflow-y-auto">
+        <div className="flex flex-col h-full"> {/* Added flex-col and h-full here */}
+          <div className="space-y-4 pb-4"> {/* Top fixed section */}
+            <h2 className="text-xl font-semibold text-sidebar-foreground">Your Projects</h2>
+            <Button onClick={() => navigate('/project/new')} className="w-full" variant="outline">
+              <PlusCircle className="mr-2 h-4 w-4" /> Create New Project
+            </Button>
+            <CurrentContextDisplay
+              activeProject={activeProject}
+              activePhase={activePhase}
+              activeStep={activeStep}
+              activeDocument={activeDocument}
+            />
+          </div>
+          <div className="flex-1 overflow-y-auto pr-2"> {/* Scrollable project list */}
             <ProjectList />
           </div>
-          <div className="pt-4 border-t border-sidebar-border space-y-2">
+          <div className="pt-4 border-t border-sidebar-border space-y-2"> {/* Bottom fixed section */}
             <Button onClick={() => navigate('/dashboard/profile')} className="w-full" variant="ghost">
               <UserCircle2 className="mr-2 h-4 w-4" /> Profile
             </Button>
