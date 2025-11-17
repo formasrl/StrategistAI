@@ -184,7 +184,7 @@ serve(async (req) => {
         model: REVIEW_MODEL,
         response_format: { type: "json_object" },
         temperature: 0.2,
-        max_tokens: 600,
+        max_tokens: 400, // Added max_tokens here
         messages: [
           { role: "system", content: reviewSystemPrompt },
           { role: "user", content: reviewPrompt },
@@ -213,8 +213,10 @@ serve(async (req) => {
     try {
       parsedReview = JSON.parse(rawContent);
     } catch (error) {
-      console.error("Review parsing error", error, rawContent);
-      return respond({ error: "Review output was malformed." }, 500);
+      console.error("Review parsing error:", error);
+      console.error("Raw AI response:", rawContent);
+      console.error("Raw AI response chunk size:", rawContent.length);
+      return respond({ error: "AI review output was malformed. Please try again." }, 500);
     }
 
     const normalized = normalizeReview(parsedReview);
