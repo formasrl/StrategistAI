@@ -7,6 +7,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { supabase } from '@/integrations/supabase/client';
 import { showError } from '@/utils/toast';
 import { useSession } from '@/integrations/supabase/SessionContextProvider';
+import { cn } from '@/lib/utils'; // Import cn for conditional classnames
 
 interface ChatMessage {
   id: string;
@@ -17,8 +18,8 @@ interface ChatMessage {
 
 interface AiChatbotProps {
   projectId?: string;
-  phaseId?: number;
-  stepId?: number;
+  phaseId?: string; // Changed from number to string | undefined
+  stepId?: string;  // Changed from number to string | undefined
   documentId?: string;
 }
 

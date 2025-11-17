@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { useParams, useOutletContext, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Document, AiReview } from '@/types/supabase';
 import { showError, showSuccess } from '@/utils/toast';
@@ -24,14 +24,32 @@ import {
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css'; // Import Quill styles
 
-interface DocumentEditorOutletContext {
+// Define props for when DocumentEditor is rendered directly (e.g., by StepWorkspace)
+interface DocumentEditorProps {
+  projectId?: string; // Make optional for direct route
+  documentId?: string; // Make optional for direct route
+  setAiReview?: (review: AiReview | null) => void;
+  setIsAiReviewLoading?: (isLoading: boolean) => void;
+}
+
+// Define a local context type for DocumentEditor when used as a standalone route
+interface DocumentEditorLocalOutletContext {
   setAiReview: (review: AiReview | null) => void;
   setIsAiReviewLoading: (isLoading: boolean) => void;
 }
 
-const DocumentEditor: React.FC = () => {
-  const { projectId, documentId } = useParams<{ projectId: string; documentId: string }>();
+const DocumentEditor: React.FC<DocumentEditorProps> = ({
+  projectId: propProjectId,
+  documentId: propDocumentId,
+  setAiReview: propSetAiReview,
+  setIsAiReviewLoading: propSetIsAiReviewLoading,
+}) => {
+  // Use params for routing, or props if rendered directly
+  const routeParams = useParams<{ projectId: string; documentId: string }>();
+  const currentProjectId = propProjectId || routeParams.projectId;
+  const currentDocumentId = propDocumentId || routeParams.documentId;
   const navigate = useNavigate();
+
   const [document, setDocument] = useState<Document | null>(null);
   const [isLoadingDocument, setIsLoadingDocument] = useState(true);
   const [content, setContent] = useState<string>('');
@@ -40,21 +58,36 @@ const DocumentEditor: React.FC = () => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [aiReview, setAiReviewState] = useState<AiReview | null>(null);
   const [isLoadingAiReview, setIsLoadingAiReviewState] = useState(false);
-  const { setAiReview, setIsAiReviewLoading } = useOutletContext<DocumentEditorOutletContext>();
 
   const [viewingVersionContent, setViewingVersionContent] = useState<string | null>(null);
   const [viewingVersionNumber, setViewingVersionNumber] = useState<number | null>(null);
 
-  useEffect(() => {
-    setAiReview(aiReview);
-  }, [aiReview, setAiReview]);
+  // Try to get context from Outlet if props are not provided
+  let contextSetAiReview: ((review: AiReview | null) => void) | undefined;
+  let contextSetIsAiReviewLoading: ((isLoading: boolean) => void) | undefined;
+  try {
+    // This will only work if DocumentEditor is rendered via <Outlet />
+    const outletContext = useOutletContext<DocumentEditorLocalOutletContext>();
+    contextSetAiReview = outletContext.setAiReview;
+    contextSetIsAiReviewLoading = outletContext.setIsAiReviewLoading;
+  } catch (e) {
+    // Not rendered via Outlet, context will be undefined
+  }
+
+  // Prioritize props, then context
+  const actualSetAiReview = propSetAiReview || contextSetAiReview;
+  const actualSetIsAiReviewLoading = propSetIsAiReviewLoading || contextSetIsAiReviewLoading;
 
   useEffect(() => {
-    setIsAiReviewLoading(isLoadingAiReview);
-  }, [isLoadingAiReview, setIsAiReviewLoading]);
+    if (actualSetAiReview) actualSetAiReview(aiReview);
+  }, [aiReview, actualSetAiReview]);
+
+  useEffect(() => {
+    if (actualSetIsAiReviewLoading) actualSetIsAiReviewLoading(isLoadingAiReview);
+  }, [isLoadingAiReview, actualSetIsAiReviewLoading]);
 
   const fetchDocumentAndReview = useCallback(async () => {
-    if (!documentId) {
+    if (!currentDocumentId) {
       setIsLoadingDocument(false);
       return;
     }
@@ -63,7 +96,7 @@ const DocumentEditor: React.FC = () => {
     const { data, error } = await supabase
       .from('documents')
       .select('*')
-      .eq('id', documentId)
+      .eq('id', currentDocumentId)
       .single();
 
     if (error) {
@@ -84,7 +117,7 @@ const DocumentEditor: React.FC = () => {
       const { data: reviewData, error: reviewError } = await supabase
         .from('ai_reviews')
         .select('*')
-        .eq('document_id', documentId)
+        .eq('document_id', currentDocumentId)
         .order('review_timestamp', { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -99,7 +132,7 @@ const DocumentEditor: React.FC = () => {
       }
     }
     setIsLoadingDocument(false);
-  }, [documentId]);
+  }, [currentDocumentId]);
 
   useEffect(() => {
     fetchDocumentAndReview();
@@ -149,23 +182,21 @@ const DocumentEditor: React.FC = () => {
   };
 
   const handleDeleteDocument = async () => {
-    if (!documentId || isDeleting) return;
+    if (!currentDocumentId || isDeleting) return;
 
     setIsDeleting(true);
     try {
-      // Supabase RLS should handle cascading deletes if foreign keys are set up correctly
-      // For example, deleting a document should cascade to document_versions and ai_reviews
       const { error } = await supabase
         .from('documents')
         .delete()
-        .eq('id', documentId);
+        .eq('id', currentDocumentId);
 
       if (error) {
         throw new Error(`Failed to delete document: ${error.message}`);
       }
 
       showSuccess('Document deleted successfully!');
-      navigate(`/dashboard/${projectId}`); // Redirect to the project details page
+      navigate(`/dashboard/${currentProjectId}`); // Redirect to the project details page
     } catch (error: any) {
       showError(`Delete failed: ${error.message}`);
     } finally {
@@ -349,9 +380,9 @@ const DocumentEditor: React.FC = () => {
         </CardContent>
       </Card>
 
-      {document.id && document.current_version !== undefined && (
+      {currentDocumentId && document.current_version !== undefined && (
         <DocumentVersionList
-          documentId={document.id}
+          documentId={currentDocumentId}
           currentVersionNumber={document.current_version}
           onViewVersion={handleViewHistoricalVersion}
         />

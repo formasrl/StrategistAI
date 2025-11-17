@@ -12,9 +12,10 @@ import ProjectDetails from "./pages/ProjectDetails";
 import DocumentEditor from "./pages/DocumentEditor";
 import UserSettings from "./pages/UserSettings";
 import Profile from "./pages/Profile";
+import StepWorkspace from "./pages/StepWorkspace"; // New import for StepWorkspace
 import { SessionContextProvider } from "./integrations/supabase/SessionContextProvider";
-import { ThemeProvider } from "next-themes"; // Import from next-themes
-import AppSetupProvider from "./components/layout/AppSetupProvider"; // New import
+import { ThemeProvider } from "next-themes";
+import AppSetupProvider from "./components/layout/AppSetupProvider";
 
 const queryClient = new QueryClient();
 
@@ -23,10 +24,10 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <ThemeProvider attribute="class" defaultTheme="system" enableSystem> {/* next-themes ThemeProvider */}
+      <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
         <BrowserRouter>
           <SessionContextProvider>
-            <AppSetupProvider> {/* Our custom setup provider */}
+            <AppSetupProvider>
               <Routes>
                 <Route path="/" element={<Index />} />
                 <Route path="/login" element={<Login />} />
@@ -41,6 +42,7 @@ const App = () => (
                     </div>
                   } />
                   <Route path=":projectId" element={<ProjectDetails />} />
+                  <Route path=":projectId/step/:stepId" element={<StepWorkspace />} /> {/* New route for StepWorkspace */}
                   <Route path=":projectId/document/:documentId" element={<DocumentEditor />} />
                   <Route path="settings" element={<UserSettings />} />
                   <Route path="profile" element={<Profile />} />

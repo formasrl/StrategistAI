@@ -5,12 +5,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import AiChatbot from './AiChatbot';
 import { AiReview } from '@/types/supabase';
 import { Brain, MessageCircle } from 'lucide-react';
-import AiPanelContent from './AiPanelContent'; // Re-import AiPanelContent
+import AiPanelContent from './AiPanelContent';
 
 interface AiPanelProps {
   projectId?: string;
-  phaseId?: number;
-  stepId?: number;
+  phaseId?: string; // Changed from number to string | undefined
+  stepId?: string;  // Changed from number to string | undefined
   documentId?: string;
   aiReview: AiReview | null;
   isAiReviewLoading: boolean;

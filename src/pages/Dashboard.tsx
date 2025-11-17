@@ -7,21 +7,19 @@ import { supabase } from '@/integrations/supabase/client';
 import { showSuccess, showError } from '@/utils/toast';
 import ProjectList from '@/components/projects/ProjectList';
 import { PlusCircle, Settings, LogOut, UserCircle2 } from 'lucide-react';
-import AiPanel from '@/components/ai/AiPanel'; // New import for AiPanel
+import AiPanel from '@/components/ai/AiPanel';
 import { AiReview } from '@/types/supabase';
-
-// Define the type for the Outlet context
-interface DashboardOutletContext {
-  setAiReview: (review: AiReview | null) => void;
-  setIsAiReviewLoading: (isLoading: boolean) => void;
-}
 
 const Dashboard = () => {
   const { session, isLoading } = useSession();
   const navigate = useNavigate();
-  const { projectId, documentId } = useParams<{ projectId?: string; documentId?: string }>();
-  const phaseId = parseInt(useParams<{ phaseId?: string }>().phaseId || '0'); // Assuming phaseId can be extracted if needed
-  const stepId = parseInt(useParams<{ stepId?: string }>().stepId || '0'); // Assuming stepId can be extracted if needed
+  // Use useParams to get current route parameters
+  const { projectId, documentId, stepId } = useParams<{ projectId?: string; documentId?: string; stepId?: string }>();
+
+  // State to manage the documentId and stepId that the AiPanel should focus on
+  const [aiPanelDocumentId, setAiPanelDocumentId] = useState<string | undefined>(documentId);
+  const [aiPanelStepId, setAiPanelStepId] = useState<string | undefined>(stepId);
+  const [aiPanelPhaseId, setAiPanelPhaseId] = useState<string | undefined>(undefined); // Derived from stepId
 
   const [activeAiReview, setActiveAiReview] = useState<AiReview | null>(null);
   const [isAiReviewLoading, setIsAiReviewLoading] = useState(false);
@@ -32,6 +30,34 @@ const Dashboard = () => {
     }
   }, [session, isLoading, navigate]);
 
+  // Update aiPanelDocumentId and aiPanelStepId when URL params change
+  useEffect(() => {
+    setAiPanelDocumentId(documentId);
+    setAiPanelStepId(stepId);
+  }, [documentId, stepId]);
+
+  // Fetch phaseId if aiPanelStepId is set
+  useEffect(() => {
+    if (aiPanelStepId) {
+      const fetchPhaseId = async () => {
+        const { data, error } = await supabase
+          .from('steps')
+          .select('phase_id')
+          .eq('id', aiPanelStepId)
+          .single();
+        if (error) {
+          console.error('Error fetching phaseId for AI panel:', error);
+          setAiPanelPhaseId(undefined);
+        } else {
+          setAiPanelPhaseId(data.phase_id);
+        }
+      };
+      fetchPhaseId();
+    } else {
+      setAiPanelPhaseId(undefined);
+    }
+  }, [aiPanelStepId]);
+
   // Function to fetch the latest AI review for a given document
   const fetchLatestAiReview = useCallback(async (docId: string) => {
     setIsAiReviewLoading(true);
@@ -41,9 +67,9 @@ const Dashboard = () => {
       .eq('document_id', docId)
       .order('review_timestamp', { ascending: false })
       .limit(1)
-      .maybeSingle(); // Use maybeSingle to handle no rows gracefully
+      .maybeSingle();
 
-    if (reviewError && reviewError.code !== 'PGRST116') { // PGRST116 means no rows found
+    if (reviewError && reviewError.code !== 'PGRST116') {
       console.error('Error fetching AI review:', reviewError);
       setActiveAiReview(null);
       showError(`Failed to load AI review: ${reviewError.message}`);
@@ -72,23 +98,20 @@ const Dashboard = () => {
       setActiveAiReview(null);
     } else {
       showSuccess('AI review generated successfully!');
-      // Refetch the latest review from the database to ensure consistency
       await fetchLatestAiReview(docId);
     }
     setIsAiReviewLoading(false);
   }, [isAiReviewLoading, fetchLatestAiReview, session?.access_token]);
 
-
-  // Reset AI review state and fetch new review when documentId changes
+  // Reset AI review state and fetch new review when aiPanelDocumentId changes
   useEffect(() => {
-    if (documentId) {
-      fetchLatestAiReview(documentId);
+    if (aiPanelDocumentId) {
+      fetchLatestAiReview(aiPanelDocumentId);
     } else {
       setActiveAiReview(null);
       setIsAiReviewLoading(false);
     }
-  }, [documentId, fetchLatestAiReview]);
-
+  }, [aiPanelDocumentId, fetchLatestAiReview]);
 
   if (isLoading) {
     return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
@@ -105,9 +128,11 @@ const Dashboard = () => {
   };
 
   // The context value to be passed to nested routes
-  const outletContextValue: DashboardOutletContext = {
+  const outletContextValue = {
     setAiReview: setActiveAiReview,
     setIsAiReviewLoading: setIsAiReviewLoading,
+    setDocumentIdForAiPanel: setAiPanelDocumentId, // Pass setter for document ID
+    setStepIdForAiPanel: setAiPanelStepId,       // Pass setter for step ID
   };
 
   return (
@@ -143,9 +168,9 @@ const Dashboard = () => {
         <div className="space-y-4 h-full flex flex-col">
           <AiPanel
             projectId={projectId}
-            phaseId={phaseId}
-            stepId={stepId}
-            documentId={documentId}
+            phaseId={aiPanelPhaseId} // Pass derived phaseId
+            stepId={aiPanelStepId}
+            documentId={aiPanelDocumentId}
             aiReview={activeAiReview}
             isAiReviewLoading={isAiReviewLoading}
             onGenerateReview={handleGenerateAiReviewFromPanel}

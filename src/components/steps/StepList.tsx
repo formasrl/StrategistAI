@@ -2,44 +2,16 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Step } from '@/types/supabase';
 import { showError } from '@/utils/toast';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Badge } from '@/components/ui/badge';
-import { CheckCircle2, CircleDot, CircleDashed } from 'lucide-react';
+import StepCard from './StepCard'; // Import StepCard
 
 interface StepListProps {
   phaseId: string;
-  projectId: string;
+  projectId: string; // projectId is now explicitly used and passed down
   onStepStatusChange: () => void;
 }
 
-const getStatusIcon = (status: Step['status']) => {
-  switch (status) {
-    case 'complete':
-      return <CheckCircle2 className="h-4 w-4 text-green-500" />;
-    case 'in_progress':
-      return <CircleDot className="h-4 w-4 text-blue-500" />;
-    case 'not_started':
-    case 'locked':
-    default:
-      return <CircleDashed className="h-4 w-4 text-muted-foreground" />;
-  }
-};
-
-const getStatusBadgeVariant = (status: Step['status']) => {
-  switch (status) {
-    case 'complete':
-      return 'default';
-    case 'in_progress':
-      return 'secondary';
-    case 'not_started':
-    case 'locked':
-    default:
-      return 'outline';
-  }
-};
-
-const StepList: React.FC<StepListProps> = ({ phaseId, projectId: _projectId, onStepStatusChange }) => {
+const StepList: React.FC<StepListProps> = ({ phaseId, projectId, onStepStatusChange }) => {
   const [steps, setSteps] = useState<Step[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -109,24 +81,12 @@ const StepList: React.FC<StepListProps> = ({ phaseId, projectId: _projectId, onS
   return (
     <div className="space-y-4">
       {steps.map((step) => (
-        <Card key={step.id} className="border-l-4 border-primary">
-          <CardHeader className="pb-2">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-lg flex items-center gap-2">
-                {getStatusIcon(step.status)}
-                {step.step_number}. {step.step_name}
-              </CardTitle>
-              <Badge variant={getStatusBadgeVariant(step.status)}>
-                {step.status.replace('_', ' ')}
-              </Badge>
-            </div>
-          </CardHeader>
-          {step.description && (
-            <CardContent className="text-sm text-muted-foreground pt-0">
-              {step.description}
-            </CardContent>
-          )}
-        </Card>
+        <StepCard
+          key={step.id}
+          step={step}
+          projectId={projectId} // Pass projectId to StepCard
+          onStepStatusChange={onStepStatusChange}
+        />
       ))}
     </div>
   );
