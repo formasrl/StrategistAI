@@ -1,6 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { getEncoding } from "https://esm.sh/js-tiktoken@1.0.11";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -16,12 +15,10 @@ function stripHtmlTags(htmlContent: string | null | undefined): string {
 const REVIEW_MODEL = Deno.env.get("STRATEGIST_REVIEW_MODEL") ?? "gpt-4o-mini";
 const EMBEDDING_MODEL = Deno.env.get("STRATEGIST_EMBEDDING_MODEL") ?? "text-embedding-3-small";
 
-// Initialize encoding for common models
-const encoding = getEncoding("cl100k_base");
-
+// Approximate token counting: 1 token ≈ 4 characters
 function countTokens(text: string | null | undefined): number {
   if (!text) return 0;
-  return encoding.encode(text).length;
+  return Math.ceil(text.length / 4);
 }
 
 // Limits
@@ -197,13 +194,7 @@ serve(async (req) => {
     }
     let currentMemoriesText = formatMemories(memoryMatches);
 
-    const reviewSystemPrompt = [
-      "You are StrategistAI, a senior brand strategist reviewer.",
-      "The user writes their own documents; you review and coach.",
-      "Stay consistent with provided project profile and previous decisions.",
-      "Never invent facts outside the context.",
-      "Deliver precise, actionable, and concise feedback.",
-    ].join(" ");
+    const reviewSystemPrompt = REVIEW_SYSTEM_PROMPT;
 
     const modelTokenLimit = getModelTokenLimit(REVIEW_MODEL);
     const reviewSystemPromptTokens = countTokens(reviewSystemPrompt);
@@ -452,7 +443,7 @@ function buildEmbeddingPrompt(draft: string, step: StepRecord): string {
     .join("\n");
 }
 
-const reviewSystemPrompt = [
+const REVIEW_SYSTEM_PROMPT = [
   "You are StrategistAI, a senior brand strategist reviewer.",
   "The user writes their own documents; you review and coach.",
   "Stay consistent with provided project profile and previous decisions.",
