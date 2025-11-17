@@ -108,6 +108,26 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
 
   const isPublished = status === ('published' as Document['status']);
 
+  const syncDocumentMemory = useCallback(
+    async (action: 'publish' | 'disconnect'): Promise<{ ok: boolean; message?: string }> => {
+      if (!currentDocumentId) {
+        return { ok: false, message: 'Missing document identifier for memory sync.' };
+      }
+
+      const { error } = await supabase.functions.invoke('process-document-publish', {
+        body: { documentId: currentDocumentId, action },
+      });
+
+      if (error) {
+        console.error('Memory sync error', error);
+        return { ok: false, message: error.message ?? 'Unknown memory sync error.' };
+      }
+
+      return { ok: true };
+    },
+    [currentDocumentId],
+  );
+
   const fetchDocument = useCallback(async () => {
     if (!currentDocumentId) {
       setIsLoadingDocument(false);
@@ -210,12 +230,23 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
 
     if (error) {
       showError(`Publish failed: ${error.message}`);
-    } else {
-      const newStatus = 'published' as Document['status'];
-      setStatus(newStatus);
-      setDocument((prev) => (prev ? { ...prev, status: newStatus } : null));
-      showSuccess('Document published. It is now available to RAG and locked for editing.');
+      setIsPublishing(false);
+      return;
     }
+
+    const syncResult = await syncDocumentMemory('publish');
+
+    const newStatus = 'published' as Document['status'];
+    setStatus(newStatus);
+    setDocument((prev) => (prev ? { ...prev, status: newStatus } : null));
+
+    if (syncResult.ok) {
+      showSuccess('Document published and project memory updated.');
+    } else {
+      showSuccess('Document published.');
+      showError(`Memory sync failed: ${syncResult.message}`);
+    }
+
     setIsPublishing(false);
   };
 
@@ -233,12 +264,25 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
 
     if (error) {
       showError(`Disconnect failed: ${error.message}`);
-    } else {
-      const newStatus = 'draft' as Document['status'];
-      setStatus(newStatus);
-      setDocument((prev) => (prev ? { ...prev, status: newStatus } : null));
-      showSuccess('Document disconnected from RAG. Editing has been re-enabled.');
+      setIsDisconnecting(false);
+      return;
     }
+
+    const syncResult = await syncDocumentMemory('disconnect');
+
+    const newStatus = 'draft' as Document['status'];
+    setStatus(newStatus);
+    setDocument((prev) => (prev ? { ...prev, status: newStatus } : null));
+    setViewingVersionContent(null);
+    setViewingVersionNumber(document.current_version || null);
+
+    if (syncResult.ok) {
+      showSuccess('Document disconnected and removed from memory.');
+    } else {
+      showSuccess('Document disconnected.');
+      showError(`Memory cleanup failed: ${syncResult.message}`);
+    }
+
     setIsDisconnecting(false);
   };
 

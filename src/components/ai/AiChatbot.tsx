@@ -6,8 +6,7 @@ import { MessageCircle, Send, Loader2, Bot, User } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { supabase } from '@/integrations/supabase/client';
 import { showError } from '@/utils/toast';
-import { useSession } from '@/integrations/supabase/SessionContextProvider';
-import { cn } from '@/lib/utils'; // Import cn for conditional classnames
+import { cn } from '@/lib/utils';
 
 interface ChatMessage {
   id: string;
@@ -18,8 +17,8 @@ interface ChatMessage {
 
 interface AiChatbotProps {
   projectId?: string;
-  phaseId?: string; // Changed from number to string | undefined
-  stepId?: string;  // Changed from number to string | undefined
+  phaseId?: string;
+  stepId?: string;
   documentId?: string;
 }
 
@@ -28,7 +27,6 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
   const [inputMessage, setInputMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const { session } = useSession();
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -40,27 +38,37 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
     e?.preventDefault();
     if (!inputMessage.trim() || isSending) return;
 
+    if (!projectId || !stepId) {
+      showError('Select a project and step to chat with StrategistAI.');
+      return;
+    }
+
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
       sender: 'user',
-      text: inputMessage,
+      text: inputMessage.trim(),
       timestamp: new Date().toISOString(),
     };
-    setMessages((prev) => [...prev, userMessage]);
+
+    const pendingMessages = [...messages, userMessage];
+    const recentMessagesPayload = pendingMessages.slice(-4).map((msg) => ({
+      sender: msg.sender,
+      text: msg.text,
+    }));
+
+    setMessages(pendingMessages);
     setInputMessage('');
     setIsSending(true);
 
     try {
       const { data, error } = await supabase.functions.invoke('chat-ai-assistant', {
         body: {
-          message: inputMessage,
+          message: userMessage.text,
           projectId,
           phaseId,
           stepId,
           documentId,
-        },
-        headers: {
-          Authorization: `Bearer ${session?.access_token}`,
+          recentMessages: recentMessagesPayload,
         },
       });
 
@@ -75,7 +83,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
             timestamp: new Date().toISOString(),
           },
         ]);
-      } else {
+      } else if (data?.response) {
         const aiResponse: ChatMessage = {
           id: (Date.now() + 1).toString(),
           sender: 'ai',
@@ -83,6 +91,16 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
           timestamp: new Date().toISOString(),
         };
         setMessages((prev) => [...prev, aiResponse]);
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: (Date.now() + 1).toString(),
+            sender: 'ai',
+            text: 'I did not receive a response from the AI assistant.',
+            timestamp: new Date().toISOString(),
+          },
+        ]);
       }
     } catch (err: any) {
       console.error('Error invoking chat-ai-assistant:', err);
@@ -142,7 +160,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
                       : 'bg-muted text-muted-foreground rounded-bl-none',
                   )}
                 >
-                  <p className="text-sm">{msg.text}</p>
+                  <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
                   <span className="block text-xs opacity-70 mt-1">
                     {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </span>
