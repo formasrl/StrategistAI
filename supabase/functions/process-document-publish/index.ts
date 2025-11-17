@@ -47,6 +47,7 @@ serve(async (req) => {
       { global: { headers: { Authorization: authHeader } } }
     );
 
+    // Fetch document and its related project/step, implicitly filtered by RLS via authHeader
     const { data: documentData, error: documentError } = await supabaseClient
       .from("documents")
       .select(
@@ -80,7 +81,7 @@ serve(async (req) => {
       .maybeSingle();
 
     if (documentError || !documentData) {
-      return respond({ error: "Document not found." }, 404);
+      return respond({ error: "Document not found or accessible." }, 404);
     }
 
     const projectInfo = extractSingle<ProjectInfo>(documentData.projects);
@@ -111,11 +112,13 @@ serve(async (req) => {
           keyDecisions: ["No key decisions captured yet."],
           tags: fallbackTags,
         };
-        await supabaseClient.from("project_document_embeddings").delete().eq("document_id", documentId);
+        // Filter by project_id to ensure data isolation
+        await supabaseClient.from("project_document_embeddings").delete().eq("document_id", documentId).eq("project_id", documentData.project_id);
       } else {
         summaryData = await generateSummary(openAIKeyResult.key, documentData.document_name, trimmedContent, fallbackTags);
         const embeddingVector = await createEmbedding(openAIKeyResult.key, summaryData.summary, summaryData.keyDecisions);
 
+        // Filter by project_id to ensure data isolation
         const { error: upsertError } = await supabaseClient
           .from("project_document_embeddings")
           .upsert(
@@ -140,6 +143,7 @@ serve(async (req) => {
         }
       }
 
+      // Filter by project_id to ensure data isolation
       const { error: updateDocError } = await supabaseClient
         .from("documents")
         .update({
@@ -148,7 +152,8 @@ serve(async (req) => {
           tags: summaryData.tags,
           last_published_at: timestamp,
         })
-        .eq("id", documentId);
+        .eq("id", documentId)
+        .eq("project_id", documentData.project_id); // Ensure document belongs to the project
 
       if (updateDocError) {
         console.error("Failed to update document metadata", updateDocError);
@@ -179,8 +184,10 @@ serve(async (req) => {
     }
 
     // Disconnect branch
-    await supabaseClient.from("project_document_embeddings").delete().eq("document_id", documentId);
+    // Filter by project_id to ensure data isolation
+    await supabaseClient.from("project_document_embeddings").delete().eq("document_id", documentId).eq("project_id", documentData.project_id);
 
+    // Filter by project_id to ensure data isolation
     const { error: clearDocError } = await supabaseClient
       .from("documents")
       .update({
@@ -189,7 +196,8 @@ serve(async (req) => {
         tags: null,
         last_published_at: null,
       })
-      .eq("id", documentId);
+      .eq("id", documentId)
+      .eq("project_id", documentData.project_id); // Ensure document belongs to the project
 
     if (clearDocError) {
       console.error("Failed to clear document metadata", clearDocError);

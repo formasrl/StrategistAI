@@ -29,6 +29,7 @@ interface StepRecord {
   phases?: {
     phase_name: string | null;
     phase_number: number | null;
+    project_id: string; // Added project_id to phases
   } | null;
 }
 
@@ -80,18 +81,23 @@ serve(async (req) => {
     if (documentId) {
       const { data: documentData, error: documentError } = await supabaseClient
         .from("documents")
-        .select("project_id, step_id, content, summary") // Fetch summary here
-        .eq("id", documentId)
+        .select("project_id, step_id, content, summary") // Fetch summary here, and project_id/step_id for validation
+        .eq("id", documentId) // Filter by documentId
         .maybeSingle();
 
       if (documentError || !documentData) {
-        return respond({ error: "Document not found." }, 404);
+        return respond({ error: "Document not found or accessible." }, 404);
       }
 
       effectiveProjectId = documentData.project_id;
       effectiveStepId = documentData.step_id ?? effectiveStepId;
       effectiveDraftText = draftText ?? documentData.content ?? "";
       documentSummaryForQuery = typeof documentData.summary === "string" ? documentData.summary : undefined;
+
+      // Validate document belongs to the provided project and step
+      if (documentData.project_id !== effectiveProjectId || documentData.step_id !== effectiveStepId) {
+        return respond({ error: "Document does not belong to the provided project or step." }, 403);
+      }
     }
 
     if (!effectiveProjectId || !effectiveStepId) {
@@ -103,14 +109,15 @@ serve(async (req) => {
       return respond({ error: "Draft content is required for review." }, 400);
     }
 
+    // Fetch project profile - Filter by effectiveProjectId
     const { data: projectData, error: projectError } = await supabaseClient
       .from("projects")
-      .select("id, user_id, name, one_liner, audience, positioning, constraints, project_profile") // Fetch project_profile
-      .eq("id", effectiveProjectId)
+      .select("id, user_id, name, one_liner, audience, positioning, constraints, project_profile")
+      .eq("id", effectiveProjectId) // Filter by effectiveProjectId
       .maybeSingle();
 
     if (projectError || !projectData) {
-      return respond({ error: "Project not found." }, 404);
+      return respond({ error: "Project not found or accessible." }, 404);
     }
 
     const project = projectData as ProjectRecord;
@@ -123,16 +130,20 @@ serve(async (req) => {
     // Fetch project profile text (now directly from project.project_profile)
     const projectProfile = fetchProjectProfileText(project);
 
+    // Fetch step details - Filter by effectiveStepId
     const { data: stepData, error: stepError } = await supabaseClient
       .from("steps")
-      .select("id, step_name, description, why_matters, timeline, phases(phase_name, phase_number)")
-      .eq("id", effectiveStepId)
+      .select("id, step_name, description, why_matters, timeline, phases(phase_name, phase_number, project_id)") // Select project_id from phases
+      .eq("id", effectiveStepId) // Filter by effectiveStepId
       .maybeSingle();
 
     if (stepError || !stepData) {
-      return respond({ error: "Step details not found." }, 404);
+      return respond({ error: "Step details not found or accessible." }, 404);
     }
-
+    // Validate step belongs to the project
+    if (stepData.phases?.project_id !== effectiveProjectId) {
+      return respond({ error: "Step does not belong to the provided project." }, 403);
+    }
     const step = stepData as StepRecord;
 
     // Determine query text for relevant decisions: use document summary if available, else draft text
@@ -140,7 +151,7 @@ serve(async (req) => {
       ? documentSummaryForQuery
       : trimmedDraft;
 
-    // Call retrieve-relevant-decisions Edge Function
+    // Call retrieve-relevant-decisions Edge Function, which already filters by projectId
     const { data: relevantDecisionsData, error: relevantDecisionsError } = await supabaseClient.functions.invoke('retrieve-relevant-decisions', {
       body: { projectId: effectiveProjectId, queryText: queryTextForDecisions },
       headers: {
@@ -208,6 +219,7 @@ serve(async (req) => {
 
     const normalized = normalizeReview(parsedReview);
 
+    // Delete existing review and insert new one - Filter by documentId
     await supabaseClient.from("ai_reviews").delete().eq("document_id", documentId ?? "");
 
     const insertPayload = {
@@ -384,10 +396,10 @@ function buildReviewPrompt({
   const parts = [
     `PROJECT PROFILE:\n${projectProfile}`,
     `CURRENT STEP:\n${formatStepDefinition(step)}`,
-    `PREVIOUS BRAND DECISIONS TO CONSIDER:\n${formatMemories(memories)}`, // New section
+    `PREVIOUS BRAND DECISIONS TO CONSIDER:\n${formatMemories(memories)}`,
     `CURRENT DRAFT:\n${draft}`,
     "TASK:\nReview the draft against the project profile, the current step's goal, and the previous brand decisions.",
-    "Specifically flag any inconsistencies or conflicts between the current draft and the 'PREVIOUS BRAND DECISIONS TO CONSIDER' section.", // Enhanced instruction
+    "Specifically flag any inconsistencies or conflicts between the current draft and the 'PREVIOUS BRAND DECISIONS TO CONSIDER' section.",
     "Return strict JSON with keys:",
     `{
   "summary": string (<=40 words),

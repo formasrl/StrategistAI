@@ -45,11 +45,11 @@ serve(async (req) => {
       { global: { headers: { Authorization: authHeader } } }
     );
 
-    // 1. Fetch Project Details
+    // 1. Fetch Project Details - Filter by projectId
     const { data: projectData, error: projectError } = await supabaseClient
       .from("projects")
       .select("id, user_id, name, one_liner, audience, positioning, constraints, project_profile")
-      .eq("id", projectId)
+      .eq("id", projectId) // Ensure project is the one requested
       .maybeSingle<ProjectRecord>();
 
     if (projectError || !projectData) {
@@ -65,10 +65,11 @@ serve(async (req) => {
     }
 
     // 3. Fetch Published Documents and Extract Key Decisions from foundational steps
+    // Filter by project_id to ensure data isolation
     const { data: documents, error: documentsError } = await supabaseClient
       .from("documents")
       .select("document_name, summary, key_decisions, tags")
-      .eq("project_id", projectId)
+      .eq("project_id", projectId) // Ensure documents belong to the project
       .eq("status", "published");
 
     if (documentsError) {
@@ -122,14 +123,14 @@ serve(async (req) => {
       return respond({ error: "AI did not return a profile summary." }, 500);
     }
 
-    // 5. Save to the Project's project_profile field
+    // 5. Save to the Project's project_profile field - Filter by projectId
     const { error: updateError } = await supabaseClient
       .from("projects")
       .update({
         project_profile: generatedProfile,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", projectId);
+      .eq("id", projectId); // Ensure project is the one requested
 
     if (updateError) {
       console.error("Failed to update project profile:", updateError);

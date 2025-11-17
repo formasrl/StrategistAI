@@ -29,6 +29,7 @@ interface StepRecord {
   phases?: {
     phase_name: string | null;
     phase_number: number | null;
+    project_id: string; // Added project_id to phases
   } | null;
 }
 
@@ -77,56 +78,64 @@ serve(async (req) => {
       { global: { headers: { Authorization: authHeader } } }
     );
 
+    // Layer 1: Fetch Project Profile
     const { data: projectData, error: projectError } = await supabaseClient
       .from("projects")
-      .select("id, user_id, name, one_liner, audience, positioning, constraints, project_profile") // Fetch project_profile
-      .eq("id", projectId)
+      .select("id, user_id, name, one_liner, audience, positioning, constraints, project_profile")
+      .eq("id", projectId) // Filter by projectId
       .maybeSingle();
 
     if (projectError || !projectData) {
-      return respond({ error: "Project not found." }, 404);
+      return respond({ error: "Project not found or accessible." }, 404);
     }
 
     const project = projectData as ProjectRecord;
-
     const openAIKeyResult = await resolveOpenAIApiKey(supabaseClient, project.user_id);
     if (!openAIKeyResult.ok) {
       return respond({ error: openAIKeyResult.error }, openAIKeyResult.status ?? 400);
     }
-
-    // Fetch project profile text (now directly from project.project_profile)
     const projectProfileText = fetchProjectProfileText(project);
 
+    // Layer 2: Current Step Info
     const { data: stepData, error: stepError } = await supabaseClient
       .from("steps")
-      .select("id, step_name, description, why_matters, timeline, phases(phase_name, phase_number)")
-      .eq("id", stepId)
+      .select("id, step_name, description, why_matters, timeline, phases(phase_name, phase_number, project_id)") // Select project_id from phases
+      .eq("id", stepId) // Filter by stepId
       .maybeSingle();
 
     if (stepError || !stepData) {
-      return respond({ error: "Step details not found." }, 404);
+      return respond({ error: "Step details not found or accessible." }, 404);
     }
-
+    // Validate step belongs to the project
+    if (stepData.phases?.project_id !== projectId) {
+      return respond({ error: "Step does not belong to the provided project." }, 403);
+    }
     const step = stepData as StepRecord;
     const stepDefinition = formatStepDefinition(step);
 
     let documentContent = "";
     let documentSummary: string | undefined;
     if (documentId) {
-      const { data: documentData } = await supabaseClient
+      const { data: documentData, error: docError } = await supabaseClient
         .from("documents")
-        .select("content, summary")
-        .eq("id", documentId)
+        .select("content, summary, project_id, step_id") // Select project_id and step_id for validation
+        .eq("id", documentId) // Filter by documentId
         .maybeSingle();
 
-      if (documentData) {
-        documentContent = (documentData.content ?? "").toString();
-        documentSummary = typeof documentData.summary === "string" ? documentData.summary : undefined;
+      if (docError || !documentData) {
+        return respond({ error: "Document not found or accessible." }, 404);
       }
+      // Validate document belongs to the project and step
+      if (documentData.project_id !== projectId || documentData.step_id !== stepId) {
+        return respond({ error: "Document does not belong to the provided project or step." }, 403);
+      }
+      documentContent = (documentData.content ?? "").toString();
+      documentSummary = typeof documentData.summary === "string" ? documentData.summary : undefined;
     }
     const draftedContext = buildDraftSegment(documentContent, documentSummary);
 
-    // Call retrieve-relevant-decisions Edge Function
+    // Layer 3: Retrieved Decisions Summary + Key Points
+    // Call retrieve-relevant-decisions Edge Function, which already filters by projectId
     const { data: relevantDecisionsData, error: relevantDecisionsError } = await supabaseClient.functions.invoke('retrieve-relevant-decisions', {
       body: { projectId, queryText: message },
       headers: {

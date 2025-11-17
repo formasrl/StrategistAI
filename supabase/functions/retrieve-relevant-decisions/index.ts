@@ -50,11 +50,11 @@ serve(async (req) => {
       { global: { headers: { Authorization: authHeader } } },
     );
 
-    // Fetch project to get user_id for API key resolution
+    // Fetch project to get user_id for API key resolution - Filter by projectId
     const { data: projectData, error: projectError } = await supabaseClient
       .from("projects")
       .select("id, user_id")
-      .eq("id", projectId)
+      .eq("id", projectId) // Ensure project is the one requested
       .maybeSingle<ProjectRecord>();
 
     if (projectError || !projectData) {
@@ -68,6 +68,7 @@ serve(async (req) => {
 
     const queryEmbedding = await createEmbedding(openAIKeyResult.key, queryText);
 
+    // RPC call already filters by input_project_id
     const { data: matches, error: rpcError } = await supabaseClient.rpc("match_step_memories", {
       input_project_id: projectId,
       query_embedding: queryEmbedding,

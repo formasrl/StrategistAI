@@ -48,16 +48,19 @@ serve(async (req) => {
     );
 
     // Fetch document summary, key decisions, and associated project user_id
+    // Filter by project_id to ensure data isolation
     const { data: documentData, error: documentError } = await supabaseClient
       .from("documents")
       .select("id, project_id, step_id, summary, key_decisions, projects(id, user_id)")
       .eq("id", step_document_id)
+      .eq("project_id", project_id) // Ensure document belongs to the project
       .maybeSingle<DocumentRecord>();
 
     if (documentError || !documentData) {
-      return respond({ error: "Document not found or accessible." }, 404);
+      return respond({ error: "Document not found or accessible within this project." }, 404);
     }
 
+    // Additional validation: ensure document's project_id matches the provided project_id
     if (documentData.project_id !== project_id) {
       return respond({ error: "Document does not belong to the provided project." }, 403);
     }
