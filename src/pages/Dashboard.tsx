@@ -8,7 +8,8 @@ import { showSuccess, showError } from '@/utils/toast';
 import ProjectList from '@/components/projects/ProjectList';
 import { PlusCircle, Settings, LogOut, UserCircle2 } from 'lucide-react';
 import AiPanel from '@/components/ai/AiPanel';
-import { AiReview } from '@/types/supabase';
+import { AiReview, Project, Phase, Step, Document } from '@/types/supabase'; // Import types
+import CurrentContextDisplay from '@/components/layout/CurrentContextDisplay'; // New import
 
 const Dashboard = () => {
   const { session, isLoading } = useSession();
@@ -24,6 +25,12 @@ const Dashboard = () => {
   const [activeAiReview, setActiveAiReview] = useState<AiReview | null>(null);
   const [isAiReviewLoading, setIsAiReviewLoading] = useState(false);
 
+  // States for current context display
+  const [activeProject, setActiveProject] = useState<Project | null>(null);
+  const [activePhase, setActivePhase] = useState<Phase | null>(null);
+  const [activeStep, setActiveStep] = useState<Step | null>(null);
+  const [activeDocument, setActiveDocument] = useState<Document | null>(null);
+
   useEffect(() => {
     if (!isLoading && !session) {
       navigate('/login');
@@ -35,6 +42,72 @@ const Dashboard = () => {
     setAiPanelDocumentId(documentId);
     setAiPanelStepId(stepId);
   }, [documentId, stepId]);
+
+  // Effect to fetch active context (project, phase, step, document)
+  useEffect(() => {
+    const fetchActiveContext = async () => {
+      setActiveProject(null);
+      setActivePhase(null);
+      setActiveStep(null);
+      setActiveDocument(null);
+
+      if (documentId) {
+        const { data: docData, error: docError } = await supabase
+          .from('documents')
+          .select('*, steps(*, phases(*)), projects(*)')
+          .eq('id', documentId)
+          .single();
+
+        if (docError) {
+          console.error('Error fetching active document context:', docError);
+        } else if (docData) {
+          setActiveDocument(docData);
+          if (docData.steps) {
+            setActiveStep(docData.steps);
+            if (docData.steps.phases) {
+              setActivePhase(docData.steps.phases);
+            }
+          }
+          if (docData.projects) {
+            setActiveProject(docData.projects);
+          }
+        }
+      } else if (stepId) {
+        const { data: stepData, error: stepError } = await supabase
+          .from('steps')
+          .select('*, phases(*), projects(*)')
+          .eq('id', stepId)
+          .single();
+
+        if (stepError) {
+          console.error('Error fetching active step context:', stepError);
+        } else if (stepData) {
+          setActiveStep(stepData);
+          if (stepData.phases) {
+            setActivePhase(stepData.phases);
+          }
+          if (stepData.projects) {
+            setActiveProject(stepData.projects);
+          }
+        }
+      } else if (projectId) {
+        const { data: projectData, error: projectError } = await supabase
+          .from('projects')
+          .select('*')
+          .eq('id', projectId)
+          .single();
+
+        if (projectError) {
+          console.error('Error fetching active project context:', projectError);
+        } else if (projectData) {
+          setActiveProject(projectData);
+        }
+      }
+    };
+
+    fetchActiveContext();
+  }, [projectId, stepId, documentId]);
+
 
   // Fetch phaseId if aiPanelStepId is set
   useEffect(() => {
@@ -143,6 +216,12 @@ const Dashboard = () => {
           <Button onClick={() => navigate('/project/new')} className="w-full" variant="outline">
             <PlusCircle className="mr-2 h-4 w-4" /> Create New Project
           </Button>
+          <CurrentContextDisplay
+            activeProject={activeProject}
+            activePhase={activePhase}
+            activeStep={activeStep}
+            activeDocument={activeDocument}
+          />
           <div className="flex-1 overflow-y-auto">
             <ProjectList />
           </div>
