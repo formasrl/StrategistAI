@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { Document } from '@/types/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { FileText, CheckCircle2, Hourglass, Edit } from 'lucide-react';
+import { FileText, CheckCircle2, Hourglass, Edit, UploadCloud } from 'lucide-react';
 
 interface DocumentCardProps {
   document: Document;
@@ -11,13 +11,31 @@ interface DocumentCardProps {
 
 const getStatusBadge = (status: Document['status']) => {
   switch (status) {
+    case 'published':
+      return (
+        <Badge className="bg-emerald-500 hover:bg-emerald-500/80 text-white">
+          <UploadCloud className="mr-1 h-3 w-3" /> Published
+        </Badge>
+      );
     case 'approved':
-      return <Badge className="bg-green-500 hover:bg-green-500/80 text-white"><CheckCircle2 className="mr-1 h-3 w-3" /> Approved</Badge>;
+      return (
+        <Badge className="bg-green-500 hover:bg-green-500/80 text-white">
+          <CheckCircle2 className="mr-1 h-3 w-3" /> Approved
+        </Badge>
+      );
     case 'in_review':
-      return <Badge variant="secondary" className="bg-blue-500 hover:bg-blue-500/80 text-white"><Hourglass className="mr-1 h-3 w-3 animate-pulse" /> In Review</Badge>;
+      return (
+        <Badge variant="secondary" className="bg-blue-500 hover:bg-blue-500/80 text-white">
+          <Hourglass className="mr-1 h-3 w-3 animate-pulse" /> In Review
+        </Badge>
+      );
     case 'draft':
     default:
-      return <Badge variant="outline" className="text-muted-foreground"><Edit className="mr-1 h-3 w-3" /> Draft</Badge>;
+      return (
+        <Badge variant="outline" className="text-muted-foreground">
+          <Edit className="mr-1 h-3 w-3" /> Draft
+        </Badge>
+      );
   }
 };
 

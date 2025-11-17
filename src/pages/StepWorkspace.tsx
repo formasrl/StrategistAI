@@ -14,8 +14,6 @@ interface StepWorkspaceOutletContext {
   setIsAiReviewLoading: (isLoading: boolean) => void;
   setDocumentIdForAiPanel: (docId: string | undefined) => void;
   setStepIdForAiPanel: (stepId: string | undefined) => void;
-  aiReview: AiReview | null;
-  isAiReviewLoading: boolean;
 }
 
 const StepWorkspace: React.FC = () => {
