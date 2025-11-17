@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { stripHtmlTags } from "./htmlStripper.ts"; // Corrected import path
-import { getEncoding } from "https://esm.sh/js-tiktoken@1.0.11"; // Import tiktoken
+import { stripHtmlTags } from "./utils/htmlStripper.ts";
+import { getEncoding } from "https://esm.sh/js-tiktoken@1.0.11";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -11,7 +11,7 @@ const corsHeaders = {
 const CHAT_MODEL = Deno.env.get("STRATEGIST_CHAT_MODEL") ?? "gpt-4o-mini";
 const EMBEDDING_MODEL = Deno.env.get("STRATEGIST_EMBEDDING_MODEL") ?? "text-embedding-3-small";
 
-// Initialize encoding for common models (used by GPT-4, GPT-3.5-turbo, text-embedding-ada-002)
+// Initialize encoding for common models
 const encoding = getEncoding("cl100k_base");
 
 function countTokens(text: string | null | undefined): number {
@@ -19,7 +19,7 @@ function countTokens(text: string | null | undefined): number {
   return encoding.encode(text).length;
 }
 
-// User-specified limits
+// Limits
 const TRUNCATION_CHAR_LIMIT = 3000;
 const GPT_3_5_MAX_TOKENS = 6000;
 const GPT_4_MAX_TOKENS = 30000;
@@ -28,11 +28,9 @@ function getModelTokenLimit(modelName: string): number {
   if (modelName.includes("gpt-4")) {
     return GPT_4_MAX_TOKENS;
   }
-  // Default for gpt-3.5, gpt-4o-mini, etc.
   return GPT_3_5_MAX_TOKENS;
 }
 
-// Helper to truncate text to a target character count
 function truncateToChars(text: string, maxChars: number): string {
   if (!text || maxChars <= 0) return "";
   if (text.length <= maxChars) return text;
@@ -156,7 +154,7 @@ serve(async (req) => {
       if (documentData.project_id !== projectId || documentData.step_id !== stepId) {
         return respond({ error: "Document does not belong to the provided project or step." }, 403);
       }
-      currentDocumentContent = stripHtmlTags(documentData.content ?? ""); // Strip HTML tags
+      currentDocumentContent = stripHtmlTags(documentData.content ?? "");
       currentDocumentSummary = typeof documentData.summary === "string" ? documentData.summary : undefined;
     }
     let currentDraftedContext = buildDraftSegment(currentDocumentContent, currentDocumentSummary);
@@ -210,7 +208,7 @@ serve(async (req) => {
       // 1. Truncate document content to TRUNCATION_CHAR_LIMIT (3000 chars)
       if (currentDocumentContent && currentDocumentContent.length > TRUNCATION_CHAR_LIMIT) {
         currentDocumentContent = truncateToChars(currentDocumentContent, TRUNCATION_CHAR_LIMIT);
-        currentDraftedContext = buildDraftSegment(currentDocumentContent, currentDocumentSummary); // Rebuild draftedContext
+        currentDraftedContext = buildDraftSegment(currentDocumentContent, currentDocumentSummary);
         totalPromptTokens =
           systemPromptTokens +
           countTokens(currentProjectProfileText) +
@@ -225,7 +223,6 @@ serve(async (req) => {
       // 2. If still over, truncate conversationSnippet
       if (totalPromptTokens > modelTokenLimit && currentConversationSnippet) {
         const tokensToReduce = totalPromptTokens - modelTokenLimit;
-        // Rough estimate: 1 token ~ 4 characters
         const charsToKeep = Math.max(0, countTokens(currentConversationSnippet) - tokensToReduce) * 4;
         currentConversationSnippet = truncateToChars(currentConversationSnippet, charsToKeep);
         totalPromptTokens =
