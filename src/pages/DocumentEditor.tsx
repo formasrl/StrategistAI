@@ -6,7 +6,7 @@ import { showError, showSuccess } from '@/utils/toast';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
-import { Save, Brain, Loader2, RotateCcw, Trash2 } from 'lucide-react';
+import { Save, Loader2, RotateCcw, Trash2 } from 'lucide-react';
 import DocumentVersionList from '@/components/documents/DocumentVersionList';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
@@ -28,21 +28,19 @@ import 'react-quill/dist/quill.snow.css'; // Import Quill styles
 interface DocumentEditorProps {
   projectId?: string; // Make optional for direct route
   documentId?: string; // Make optional for direct route
-  setAiReview?: (review: AiReview | null) => void;
-  setIsAiReviewLoading?: (isLoading: boolean) => void;
-}
-
-// Define a local context type for DocumentEditor when used as a standalone route
-interface DocumentEditorLocalOutletContext {
-  setAiReview: (review: AiReview | null) => void;
-  setIsAiReviewLoading: (isLoading: boolean) => void;
+  setAiReview: (review: AiReview | null) => void; // Setter to update parent's AI review state
+  setIsAiReviewLoading: (isLoading: boolean) => void; // Setter to update parent's AI review loading state
+  aiReview: AiReview | null; // Current AI review from parent
+  isAiReviewLoading: boolean; // Current AI review loading state from parent
 }
 
 const DocumentEditor: React.FC<DocumentEditorProps> = ({
   projectId: propProjectId,
   documentId: propDocumentId,
-  setAiReview: propSetAiReview,
-  setIsAiReviewLoading: propSetIsAiReviewLoading,
+  setAiReview, // Destructure setters from props
+  setIsAiReviewLoading, // Destructure setters from props
+  aiReview, // Destructure current AI review from props
+  isAiReviewLoading, // Destructure current AI review loading state from props
 }) => {
   // Use params for routing, or props if rendered directly
   const routeParams = useParams<{ projectId: string; documentId: string }>();
@@ -56,39 +54,20 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
   const [status, setStatus] = useState<Document['status']>('draft');
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [aiReview, setAiReviewState] = useState<AiReview | null>(null);
-  const [isLoadingAiReview, setIsLoadingAiReviewState] = useState(false);
 
   const [viewingVersionContent, setViewingVersionContent] = useState<string | null>(null);
   const [viewingVersionNumber, setViewingVersionNumber] = useState<number | null>(null);
 
-  // Try to get context from Outlet if props are not provided
-  let contextSetAiReview: ((review: AiReview | null) => void) | undefined;
-  let contextSetIsAiReviewLoading: ((isLoading: boolean) => void) | undefined;
-  try {
-    // This will only work if DocumentEditor is rendered via <Outlet />
-    const outletContext = useOutletContext<DocumentEditorLocalOutletContext>();
-    contextSetAiReview = outletContext.setAiReview;
-    contextSetIsAiReviewLoading = outletContext.setIsAiReviewLoading;
-  } catch (e) {
-    // Not rendered via Outlet, context will be undefined
-  }
-
-  // Prioritize props, then context
-  const actualSetAiReview = propSetAiReview || contextSetAiReview;
-  const actualSetIsAiReviewLoading = propSetIsAiReviewLoading || contextSetIsAiReviewLoading;
-
-  useEffect(() => {
-    if (actualSetAiReview) actualSetAiReview(aiReview);
-  }, [aiReview, actualSetAiReview]);
-
-  useEffect(() => {
-    if (actualSetIsAiReviewLoading) actualSetIsAiReviewLoading(isLoadingAiReview);
-  }, [isLoadingAiReview, actualSetIsAiReviewLoading]);
-
-  const fetchDocumentAndReview = useCallback(async () => {
+  const fetchDocument = useCallback(async () => {
     if (!currentDocumentId) {
       setIsLoadingDocument(false);
+      setDocument(null);
+      setContent('');
+      setStatus('draft');
+      setViewingVersionContent(null);
+      setViewingVersionNumber(null);
+      setAiReview(null); // Clear AI review in parent when no document
+      setIsAiReviewLoading(false); // Clear AI loading state in parent
       return;
     }
 
@@ -104,39 +83,24 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
       setDocument(null);
       setContent('');
       setStatus('draft');
-      setAiReviewState(null);
       setViewingVersionContent(null);
       setViewingVersionNumber(null);
+      setAiReview(null); // Clear AI review in parent on error
+      setIsAiReviewLoading(false); // Clear AI loading state in parent
     } else {
       setDocument(data);
       setContent(data?.content || '');
       setStatus(data?.status || 'draft');
       setViewingVersionContent(null);
       setViewingVersionNumber(data?.current_version || null);
-
-      const { data: reviewData, error: reviewError } = await supabase
-        .from('ai_reviews')
-        .select('*')
-        .eq('document_id', currentDocumentId)
-        .order('review_timestamp', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (reviewError && reviewError.code !== 'PGRST116') {
-        console.error('Error fetching AI review:', reviewError);
-        setAiReviewState(null);
-      } else if (reviewData) {
-        setAiReviewState(reviewData);
-      } else {
-        setAiReviewState(null);
-      }
+      // AI review is now managed by Dashboard, so no need to fetch here
     }
     setIsLoadingDocument(false);
-  }, [currentDocumentId]);
+  }, [currentDocumentId, setAiReview, setIsAiReviewLoading]);
 
   useEffect(() => {
-    fetchDocumentAndReview();
-  }, [fetchDocumentAndReview]);
+    fetchDocument();
+  }, [fetchDocument]);
 
   const handleSave = async () => {
     if (!document || isSaving) return;
@@ -196,6 +160,8 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
       }
 
       showSuccess('Document deleted successfully!');
+      setAiReview(null); // Clear AI review in parent
+      setIsAiReviewLoading(false); // Clear AI loading state in parent
       navigate(`/dashboard/${currentProjectId}`); // Redirect to the project details page
     } catch (error: any) {
       showError(`Delete failed: ${error.message}`);
@@ -219,29 +185,6 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
     } else {
       showSuccess(`Document status updated to "${newStatus.replace('_', ' ')}".`);
       setDocument((prev) => prev ? { ...prev, status: newStatus } : null);
-    }
-  };
-
-  const handleGenerateAiReview = async () => {
-    if (!document || isLoadingAiReview) return;
-
-    setIsAiReviewState(true);
-    try {
-      const { data, error } = await supabase.functions.invoke('generate-ai-review', {
-        body: { documentId: document.id },
-      });
-
-      if (error) {
-        throw new Error(error.message);
-      }
-
-      showSuccess('AI review generated successfully!');
-      await fetchDocumentAndReview();
-    } catch (error: any) {
-      showError(`AI review failed: ${error.message}`);
-      setAiReviewState(null);
-    } finally {
-      setIsAiReviewState(false);
     }
   };
 
@@ -331,13 +274,7 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
                 <RotateCcw className="mr-2 h-4 w-4" /> Back to Latest
               </Button>
             )}
-            <Button onClick={handleGenerateAiReview} disabled={isLoadingAiReview || !!viewingVersionContent}>
-              {isLoadingAiReview ? (
-                <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating...</>
-              ) : (
-                <><Brain className="mr-2 h-4 w-4" /> Generate AI Review</>
-              )}
-            </Button>
+            {/* Removed the "Generate AI Review" button from here */}
             <Button onClick={handleSave} disabled={isSaving || !!viewingVersionContent}>
               {isSaving ? 'Saving...' : <><Save className="mr-2 h-4 w-4" /> Save Document</>}
             </Button>

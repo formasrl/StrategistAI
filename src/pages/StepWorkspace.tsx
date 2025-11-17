@@ -3,10 +3,10 @@ import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Step, Document, AiReview } from '@/types/supabase';
 import { showError, showSuccess } from '@/utils/toast';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
-import { FileText, Lightbulb, Brain, Loader2 } from 'lucide-react';
+import { Lightbulb, Loader2 } from 'lucide-react';
 import DocumentEditor from './DocumentEditor'; // Re-use the existing DocumentEditor
 
 // Define the type for the Outlet context, similar to Dashboard
@@ -15,6 +15,8 @@ interface StepWorkspaceOutletContext {
   setIsAiReviewLoading: (isLoading: boolean) => void;
   setDocumentIdForAiPanel: (docId: string | undefined) => void; // New: to update AiPanel's document context
   setStepIdForAiPanel: (stepId: string | undefined) => void; // New: to update AiPanel's step context
+  aiReview: AiReview | null; // New: receive current AI review from Dashboard
+  isAiReviewLoading: boolean; // New: receive current AI review loading state from Dashboard
 }
 
 const StepWorkspace: React.FC = () => {
@@ -26,8 +28,14 @@ const StepWorkspace: React.FC = () => {
   const [isLoadingDocument, setIsLoadingDocument] = useState(true);
 
   // Get context from DashboardLayout
-  const { setAiReview, setIsAiReviewLoading, setDocumentIdForAiPanel, setStepIdForAiPanel } =
-    useOutletContext<StepWorkspaceOutletContext>();
+  const {
+    setAiReview,
+    setIsAiReviewLoading,
+    setDocumentIdForAiPanel,
+    setStepIdForAiPanel,
+    aiReview, // Destructure current AI review from context
+    isAiReviewLoading, // Destructure current AI review loading state from context
+  } = useOutletContext<StepWorkspaceOutletContext>();
 
   // Set the stepId for the AI panel when this workspace is active
   useEffect(() => {
@@ -179,9 +187,11 @@ const StepWorkspace: React.FC = () => {
         <DocumentEditor
           projectId={projectId}
           documentId={primaryDocumentId}
-          // Pass down the AI review setters to DocumentEditor so it can update Dashboard's state
+          // Pass down the AI review setters and current state to DocumentEditor
           setAiReview={setAiReview}
           setIsAiReviewLoading={setIsAiReviewLoading}
+          aiReview={aiReview}
+          isAiReviewLoading={isAiReviewLoading}
         />
       ) : (
         <div className="text-center text-muted-foreground p-8">

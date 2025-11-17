@@ -206,6 +206,8 @@ const Dashboard = () => {
     setIsAiReviewLoading: setIsAiReviewLoading,
     setDocumentIdForAiPanel: setAiPanelDocumentId, // Pass setter for document ID
     setStepIdForAiPanel: setAiPanelStepId,       // Pass setter for step ID
+    aiReview: activeAiReview, // Pass current AI review state
+    isAiReviewLoading: isAiReviewLoading, // Pass current AI review loading state
   };
 
   return (
