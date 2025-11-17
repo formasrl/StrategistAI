@@ -155,7 +155,20 @@ serve(async (req) => {
         return respond({ error: "Failed to store summary data on document." }, 500);
       }
 
-      await updateProjectProfile(supabaseClient, projectInfo, documentData.project_id);
+      // Trigger update-project-profile after document is published
+      try {
+        const { error: profileUpdateError } = await supabaseClient.functions.invoke('update-project-profile', {
+          body: { projectId: documentData.project_id },
+          headers: {
+            Authorization: authHeader,
+          },
+        });
+        if (profileUpdateError) {
+          console.error('Failed to trigger update-project-profile after publish:', profileUpdateError);
+        }
+      } catch (invokeError) {
+        console.error('Unexpected error invoking update-project-profile after publish:', invokeError);
+      }
 
       return respond({
         success: true,
@@ -183,7 +196,20 @@ serve(async (req) => {
       return respond({ error: "Failed to clear document memory metadata." }, 500);
     }
 
-    await updateProjectProfile(supabaseClient, projectInfo, documentData.project_id);
+    // Trigger update-project-profile after document is disconnected
+    try {
+      const { error: profileUpdateError } = await supabaseClient.functions.invoke('update-project-profile', {
+        body: { projectId: documentData.project_id },
+        headers: {
+          Authorization: authHeader,
+        },
+      });
+      if (profileUpdateError) {
+        console.error('Failed to trigger update-project-profile after disconnect:', profileUpdateError);
+      }
+    } catch (invokeError) {
+      console.error('Unexpected error invoking update-project-profile after disconnect:', invokeError);
+    }
 
     return respond({ success: true, message: "Document removed from project memory." });
   } catch (error) {
@@ -323,68 +349,6 @@ async function createEmbedding(apiKey: string, summary: string, keyDecisions: st
   return vector.map((value: number) => Number(value));
 }
 
-async function updateProjectProfile(
-  client: ReturnType<typeof createClient>,
-  project: ProjectInfo,
-  projectId: string
-) {
-  const { data: memories, error } = await client
-    .from("project_document_embeddings")
-    .select("title, summary, key_decisions")
-    .eq("project_id", projectId)
-    .order("updated_at", { ascending: false })
-    .limit(3);
-
-  if (error) {
-    console.error("Failed to fetch memories for profile", error);
-    return;
-  }
-
-  const profileText = buildProjectProfileText(project, memories ?? []);
-  const { error: upsertError } = await client
-    .from("project_profiles")
-    .upsert({
-      project_id: projectId,
-      compressed_text: profileText,
-      updated_at: new Date().toISOString(),
-    });
-
-  if (upsertError) {
-    console.error("Failed to upsert project profile", upsertError);
-  }
-}
-
-function buildProjectProfileText(project: ProjectInfo, memories: MemoryEntry[]): string {
-  const lines: string[] = [
-    "PROJECT SUMMARY:",
-    `- Brand: ${sanitizeLine(project.name, "Untitled Project")}`,
-    `- One-line: ${sanitizeLine(project.one_liner, "To be defined.")}`,
-    `- Audience: ${sanitizeLine(project.audience, "Not specified.")}`,
-    `- Positioning: ${sanitizeLine(project.positioning, "Not specified.")}`,
-    `- Constraints: ${sanitizeLine(project.constraints, "None recorded.")}`,
-  ];
-
-  if (memories.length > 0) {
-    lines.push("RECENT DECISIONS:");
-    memories.forEach((memory) => {
-      const keySnippet = (memory.key_decisions ?? [])
-        .slice(0, 2)
-        .map((decision) => decision.replace(/\.$/, ""))
-        .join("; ");
-
-      const summary = memory.summary.length > 220 ? `${memory.summary.slice(0, 217)}...` : memory.summary;
-      const decisionLine = keySnippet ? `${summary} | Key: ${keySnippet}` : summary;
-
-      lines.push(`- ${memory.title}: ${decisionLine}`);
-    });
-  } else {
-    lines.push("RECENT DECISIONS:");
-    lines.push("- No published steps yet.");
-  }
-
-  return lines.join("\n");
-}
-
 function sanitizeSummary(value: unknown, title: string): string {
   if (typeof value === "string" && value.trim()) {
     const trimmed = value.trim();
@@ -448,12 +412,6 @@ function buildFallbackTags(stepName?: string | null): string[] {
     .split(/[^a-z0-9]+/)
     .filter((part) => part.length > 1)
     .slice(0, 3);
-}
-
-function sanitizeLine(value: string | null, fallback: string): string {
-  if (!value) return fallback;
-  const trimmed = value.trim();
-  return trimmed ? trimmed : fallback;
 }
 
 function extractSingle<T>(relation: unknown): T | null {
