@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { stripHtmlTags } from "../utils/htmlStripper.ts"; // Corrected import path
+import { stripHtmlTags } from "./htmlStripper.ts"; // Corrected import path
+import { getEncoding } from "https://esm.sh/js-tiktoken@1.0.11"; // Import tiktoken
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -9,6 +10,34 @@ const corsHeaders = {
 
 const REVIEW_MODEL = Deno.env.get("STRATEGIST_REVIEW_MODEL") ?? "gpt-4o-mini";
 const EMBEDDING_MODEL = Deno.env.get("STRATEGIST_EMBEDDING_MODEL") ?? "text-embedding-3-small";
+
+// Initialize encoding for common models (used by GPT-4, GPT-3.5-turbo, text-embedding-ada-002)
+const encoding = getEncoding("cl100k_base");
+
+function countTokens(text: string | null | undefined): number {
+  if (!text) return 0;
+  return encoding.encode(text).length;
+}
+
+// User-specified limits
+const TRUNCATION_CHAR_LIMIT = 3000;
+const GPT_3_5_MAX_TOKENS = 6000;
+const GPT_4_MAX_TOKENS = 30000;
+
+function getModelTokenLimit(modelName: string): number {
+  if (modelName.includes("gpt-4")) {
+    return GPT_4_MAX_TOKENS;
+  }
+  // Default for gpt-3.5, gpt-4o-mini, etc.
+  return GPT_3_5_MAX_TOKENS;
+}
+
+// Helper to truncate text to a target character count
+function truncateToChars(text: string, maxChars: number): string {
+  if (!text || maxChars <= 0) return "";
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars - 3)}...`;
+}
 
 interface ProjectRecord {
   id: string;
@@ -76,7 +105,7 @@ serve(async (req) => {
 
     let effectiveProjectId = projectId;
     let effectiveStepId = stepId;
-    let effectiveDraftText = draftText ?? "";
+    let currentDraftContent = draftText ?? "";
     let documentSummaryForQuery: string | undefined;
 
     if (documentId) {
@@ -92,7 +121,7 @@ serve(async (req) => {
 
       effectiveProjectId = documentData.project_id;
       effectiveStepId = documentData.step_id ?? effectiveStepId;
-      effectiveDraftText = stripHtmlTags(draftText ?? documentData.content ?? ""); // Strip HTML tags
+      currentDraftContent = stripHtmlTags(draftText ?? documentData.content ?? ""); // Strip HTML tags
       documentSummaryForQuery = typeof documentData.summary === "string" ? documentData.summary : undefined;
 
       // Validate document belongs to the provided project and step
@@ -105,7 +134,7 @@ serve(async (req) => {
       return respond({ error: "projectId and stepId are required for reviews." }, 400);
     }
 
-    const trimmedDraft = effectiveDraftText.trim();
+    const trimmedDraft = currentDraftContent.trim();
     if (!trimmedDraft) {
       return respond({ error: "Draft content is required for review." }, 400);
     }
@@ -129,7 +158,7 @@ serve(async (req) => {
     }
 
     // Fetch project profile text (now directly from project.project_profile)
-    const projectProfile = fetchProjectProfileText(project);
+    let currentProjectProfile = fetchProjectProfileText(project);
 
     // Fetch step details - Filter by effectiveStepId
     const { data: stepData, error: stepError } = await supabaseClient
@@ -146,6 +175,7 @@ serve(async (req) => {
       return respond({ error: "Step does not belong to the provided project." }, 403);
     }
     const step = stepData as StepRecord;
+    let currentStepDefinition = formatStepDefinition(step);
 
     // Determine query text for relevant decisions: use document summary if available, else draft text
     const queryTextForDecisions = documentSummaryForQuery && documentSummaryForQuery.trim() !== ""
@@ -167,13 +197,64 @@ serve(async (req) => {
     } else if (relevantDecisionsData?.results) {
       memoryMatches = relevantDecisionsData.results as MemoryMatch[];
     }
+    let currentMemoriesText = formatMemories(memoryMatches);
+
+    const reviewSystemPrompt = [
+      "You are StrategistAI, a senior brand strategist reviewer.",
+      "The user writes their own documents; you review and coach.",
+      "Stay consistent with provided project profile and previous decisions.",
+      "Never invent facts outside the context.",
+      "Deliver precise, actionable, and concise feedback.",
+    ].join(" ");
+
+    const modelTokenLimit = getModelTokenLimit(REVIEW_MODEL);
+    const reviewSystemPromptTokens = countTokens(reviewSystemPrompt);
+
+    // Calculate initial tokens with full content
+    let totalPromptTokens =
+      reviewSystemPromptTokens +
+      countTokens(currentProjectProfile) +
+      countTokens(currentStepDefinition) +
+      countTokens(currentMemoriesText) +
+      countTokens(trimmedDraft); // Count tokens of the full draft content
+
+    console.log(`[generate-ai-review] Initial prompt token count: ${totalPromptTokens} for model: ${REVIEW_MODEL}`);
+
+    // Truncation logic
+    if (totalPromptTokens > modelTokenLimit) {
+      console.log(`[generate-ai-review] Prompt exceeds ${modelTokenLimit} tokens. Attempting truncation.`);
+
+      // 1. Truncate draft content to TRUNCATION_CHAR_LIMIT (3000 chars)
+      if (trimmedDraft && trimmedDraft.length > TRUNCATION_CHAR_LIMIT) {
+        currentDraftContent = truncateToChars(trimmedDraft, TRUNCATION_CHAR_LIMIT);
+        totalPromptTokens =
+          reviewSystemPromptTokens +
+          countTokens(currentProjectProfile) +
+          countTokens(currentStepDefinition) +
+          countTokens(currentMemoriesText) +
+          countTokens(currentDraftContent);
+        console.log(`[generate-ai-review] Draft content truncated to ${TRUNCATION_CHAR_LIMIT} chars. New token count: ${totalPromptTokens}`);
+      }
+
+      // 2. If still over, throw error
+      if (totalPromptTokens > modelTokenLimit) {
+        return respond(
+          {
+            error: `Your review request is too long (${totalPromptTokens} tokens). Even after truncating document content, it exceeds the model's ${modelTokenLimit} token limit. Please shorten your document content.`,
+          },
+          400,
+        );
+      }
+    }
 
     const reviewPrompt = buildReviewPrompt({
-      projectProfile,
+      projectProfile: currentProjectProfile,
       step,
-      draft: limitDraftLength(trimmedDraft),
+      draft: currentDraftContent, // Pass the potentially truncated draft content
       memories: memoryMatches,
     });
+
+    console.log(`[generate-ai-review] Final prompt token count after all truncations: ${countTokens(reviewSystemPrompt + reviewPrompt)}`);
 
     const reviewResponse = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -462,8 +543,8 @@ function convertDistanceToScore(distance: number): string {
 }
 
 function limitDraftLength(draft: string): string {
-  if (draft.length <= 6500) return draft;
-  return `${draft.slice(0, 6500)}...`;
+  // This function is now a passthrough, actual truncation happens based on token count
+  return draft;
 }
 
 function sanitizeLine(value: string | null, fallback: string): string {

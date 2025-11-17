@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { stripHtmlTags } from "../utils/htmlStripper.ts"; // Corrected import path
+import { stripHtmlTags } from "./htmlStripper.ts"; // Corrected import path
+import { getEncoding } from "https://esm.sh/js-tiktoken@1.0.11"; // Import tiktoken
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -9,6 +10,34 @@ const corsHeaders = {
 
 const CHAT_MODEL = Deno.env.get("STRATEGIST_CHAT_MODEL") ?? "gpt-4o-mini";
 const EMBEDDING_MODEL = Deno.env.get("STRATEGIST_EMBEDDING_MODEL") ?? "text-embedding-3-small";
+
+// Initialize encoding for common models (used by GPT-4, GPT-3.5-turbo, text-embedding-ada-002)
+const encoding = getEncoding("cl100k_base");
+
+function countTokens(text: string | null | undefined): number {
+  if (!text) return 0;
+  return encoding.encode(text).length;
+}
+
+// User-specified limits
+const TRUNCATION_CHAR_LIMIT = 3000;
+const GPT_3_5_MAX_TOKENS = 6000;
+const GPT_4_MAX_TOKENS = 30000;
+
+function getModelTokenLimit(modelName: string): number {
+  if (modelName.includes("gpt-4")) {
+    return GPT_4_MAX_TOKENS;
+  }
+  // Default for gpt-3.5, gpt-4o-mini, etc.
+  return GPT_3_5_MAX_TOKENS;
+}
+
+// Helper to truncate text to a target character count
+function truncateToChars(text: string, maxChars: number): string {
+  if (!text || maxChars <= 0) return "";
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars - 3)}...`;
+}
 
 interface ProjectRecord {
   id: string;
@@ -40,20 +69,6 @@ interface MemoryMatch {
   summary: string;
   key_decisions: string[] | null;
   distance: number;
-}
-
-// Helper to estimate tokens (rough character count / 4)
-function estimateTokens(text: string | null | undefined): number {
-  if (!text) return 0;
-  return Math.ceil(text.length / 4);
-}
-
-// Helper to truncate text to a target token count
-function truncateToTokens(text: string, maxTokens: number): string {
-  if (!text || maxTokens <= 0) return "";
-  const estimatedChars = maxTokens * 4; // Rough estimate
-  if (text.length <= estimatedChars) return text;
-  return `${text.slice(0, estimatedChars - 3)}...`;
 }
 
 serve(async (req) => {
@@ -108,7 +123,7 @@ serve(async (req) => {
     if (!openAIKeyResult.ok) {
       return respond({ error: openAIKeyResult.error }, openAIKeyResult.status ?? 400);
     }
-    let projectProfileText = fetchProjectProfileText(project);
+    let currentProjectProfileText = fetchProjectProfileText(project);
 
     // Layer 2: Current Step Info
     const { data: stepData, error: stepError } = await supabaseClient
@@ -124,10 +139,10 @@ serve(async (req) => {
       return respond({ error: "Step does not belong to the provided project." }, 403);
     }
     const step = stepData as StepRecord;
-    let stepDefinition = formatStepDefinition(step);
+    let currentStepDefinition = formatStepDefinition(step);
 
-    let documentContent = "";
-    let documentSummary: string | undefined;
+    let currentDocumentContent = "";
+    let currentDocumentSummary: string | undefined;
     if (documentId) {
       const { data: documentData, error: docError } = await supabaseClient
         .from("documents")
@@ -141,10 +156,10 @@ serve(async (req) => {
       if (documentData.project_id !== projectId || documentData.step_id !== stepId) {
         return respond({ error: "Document does not belong to the provided project or step." }, 403);
       }
-      documentContent = stripHtmlTags(documentData.content ?? ""); // Strip HTML tags
-      documentSummary = typeof documentData.summary === "string" ? documentData.summary : undefined;
+      currentDocumentContent = stripHtmlTags(documentData.content ?? ""); // Strip HTML tags
+      currentDocumentSummary = typeof documentData.summary === "string" ? documentData.summary : undefined;
     }
-    let draftedContext = buildDraftSegment(documentContent, documentSummary);
+    let currentDraftedContext = buildDraftSegment(currentDocumentContent, currentDocumentSummary);
 
     // Layer 3: Retrieved Decisions Summary + Key Points
     const { data: relevantDecisionsData, error: relevantDecisionsError } = await supabaseClient.functions.invoke('retrieve-relevant-decisions', {
@@ -160,75 +175,9 @@ serve(async (req) => {
     } else if (relevantDecisionsData?.results) {
       memoryMatches = relevantDecisionsData.results as MemoryMatch[];
     }
-    let memoriesText = formatMemories(memoryMatches);
+    let currentMemoriesText = formatMemories(memoryMatches);
 
-    let conversationSnippet = formatRecentConversation(recentMessages ?? []);
-
-    // --- Token Budget Safeguard Logic ---
-    const MAX_CORE_CONTEXT_TOKENS = 2000; // Profile + Step + Retrieved Decisions
-    const MAX_TOTAL_CONTEXT_TOKENS = 3000; // All context layers before user question
-
-    let tokensProfile = estimateTokens(projectProfileText);
-    let tokensStep = estimateTokens(stepDefinition);
-    let tokensMemories = estimateTokens(memoriesText);
-
-    // Check 2000 token limit for core context (Profile + Step + Retrieved Decisions)
-    if (tokensProfile + tokensStep + tokensMemories > MAX_CORE_CONTEXT_TOKENS) {
-      // Truncate retrieved decisions to only the top 1 most relevant
-      memoriesText = formatMemories(memoryMatches.slice(0, 1));
-      tokensMemories = estimateTokens(memoriesText);
-    }
-
-    let tokensConversation = estimateTokens(conversationSnippet);
-    let tokensDraft = estimateTokens(draftedContext);
-
-    let currentContextTokens = tokensProfile + tokensStep + tokensMemories + tokensConversation + tokensDraft;
-
-    // Check 3000 token limit for all context layers
-    if (currentContextTokens > MAX_TOTAL_CONTEXT_TOKENS) {
-      const availableTokensAfterCore = MAX_TOTAL_CONTEXT_TOKENS - (tokensProfile + tokensStep + tokensMemories);
-
-      // Prioritize truncating draftedContext first
-      if (availableTokensAfterCore < tokensDraft) {
-        draftedContext = truncateToTokens(draftedContext ?? "", availableTokensAfterCore);
-        tokensDraft = estimateTokens(draftedContext);
-      }
-      currentContextTokens = tokensProfile + tokensStep + tokensMemories + tokensConversation + tokensDraft;
-
-      // If still over, truncate conversationSnippet
-      if (currentContextTokens > MAX_TOTAL_CONTEXT_TOKENS) {
-        const availableTokensAfterDraft = MAX_TOTAL_CONTEXT_TOKENS - (tokensProfile + tokensStep + tokensMemories + tokensDraft);
-        if (availableTokensAfterDraft < tokensConversation) {
-          conversationSnippet = truncateToTokens(conversationSnippet ?? "", availableTokensAfterDraft);
-          tokensConversation = estimateTokens(conversationSnippet);
-        }
-      }
-    }
-    // --- End Token Budget Safeguard Logic ---
-
-    const userPromptSections = [];
-
-    // Layer 1: Project Profile
-    userPromptSections.push(`PROJECT PROFILE:\n${projectProfileText}`);
-
-    // Layer 2: Current Step Info
-    userPromptSections.push(`CURRENT STEP:\n${stepDefinition}`);
-
-    // Layer 3: Retrieved Decisions Summary + Key Points
-    userPromptSections.push(`RELEVANT PAST DECISIONS:\n${memoriesText}`);
-
-    // Optional: Recent Conversation
-    if (conversationSnippet) {
-      userPromptSections.push(`RECENT CONVERSATION:\n${conversationSnippet}`);
-    }
-
-    // Optional: Current Draft Context
-    if (draftedContext) {
-      userPromptSections.push(draftedContext);
-    }
-
-    // Layer 4: User Question
-    userPromptSections.push(`USER QUESTION:\n${message}`);
+    let currentConversationSnippet = formatRecentConversation(recentMessages ?? []);
 
     const systemPrompt = [
       "You are StrategistAI, a senior brand strategist and coach.",
@@ -238,8 +187,83 @@ serve(async (req) => {
       "If information is missing, ask clarifying questions instead of guessing.",
     ].join(" ");
 
+    const modelTokenLimit = getModelTokenLimit(CHAT_MODEL);
+    const systemPromptTokens = countTokens(systemPrompt);
+    const userMessageTokens = countTokens(message);
+
+    // Calculate initial tokens with full content
+    let totalPromptTokens =
+      systemPromptTokens +
+      countTokens(currentProjectProfileText) +
+      countTokens(currentStepDefinition) +
+      countTokens(currentMemoriesText) +
+      countTokens(currentConversationSnippet) +
+      countTokens(currentDraftedContext ?? "") +
+      userMessageTokens;
+
+    console.log(`[chat-ai-assistant] Initial prompt token count: ${totalPromptTokens} for model: ${CHAT_MODEL}`);
+
+    // Truncation logic
+    if (totalPromptTokens > modelTokenLimit) {
+      console.log(`[chat-ai-assistant] Prompt exceeds ${modelTokenLimit} tokens. Attempting truncation.`);
+
+      // 1. Truncate document content to TRUNCATION_CHAR_LIMIT (3000 chars)
+      if (currentDocumentContent && currentDocumentContent.length > TRUNCATION_CHAR_LIMIT) {
+        currentDocumentContent = truncateToChars(currentDocumentContent, TRUNCATION_CHAR_LIMIT);
+        currentDraftedContext = buildDraftSegment(currentDocumentContent, currentDocumentSummary); // Rebuild draftedContext
+        totalPromptTokens =
+          systemPromptTokens +
+          countTokens(currentProjectProfileText) +
+          countTokens(currentStepDefinition) +
+          countTokens(currentMemoriesText) +
+          countTokens(currentConversationSnippet) +
+          countTokens(currentDraftedContext ?? "") +
+          userMessageTokens;
+        console.log(`[chat-ai-assistant] Document content truncated to ${TRUNCATION_CHAR_LIMIT} chars. New token count: ${totalPromptTokens}`);
+      }
+
+      // 2. If still over, truncate conversationSnippet
+      if (totalPromptTokens > modelTokenLimit && currentConversationSnippet) {
+        const tokensToReduce = totalPromptTokens - modelTokenLimit;
+        // Rough estimate: 1 token ~ 4 characters
+        const charsToKeep = Math.max(0, countTokens(currentConversationSnippet) - tokensToReduce) * 4;
+        currentConversationSnippet = truncateToChars(currentConversationSnippet, charsToKeep);
+        totalPromptTokens =
+          systemPromptTokens +
+          countTokens(currentProjectProfileText) +
+          countTokens(currentStepDefinition) +
+          countTokens(currentMemoriesText) +
+          countTokens(currentConversationSnippet) +
+          countTokens(currentDraftedContext ?? "") +
+          userMessageTokens;
+        console.log(`[chat-ai-assistant] Conversation snippet truncated. New token count: ${totalPromptTokens}`);
+      }
+
+      // 3. If still over, throw error
+      if (totalPromptTokens > modelTokenLimit) {
+        return respond(
+          {
+            error: `Your request is too long (${totalPromptTokens} tokens). Even after truncating document content and conversation history, it exceeds the model's ${modelTokenLimit} token limit. Please shorten your query or document content.`,
+          },
+          400,
+        );
+      }
+    }
+
+    const userPromptSections = [];
+    userPromptSections.push(`PROJECT PROFILE:\n${currentProjectProfileText}`);
+    userPromptSections.push(`CURRENT STEP:\n${currentStepDefinition}`);
+    userPromptSections.push(`RELEVANT PAST DECISIONS:\n${currentMemoriesText}`);
+    if (currentConversationSnippet) {
+      userPromptSections.push(`RECENT CONVERSATION:\n${currentConversationSnippet}`);
+    }
+    if (currentDraftedContext) {
+      userPromptSections.push(currentDraftedContext);
+    }
+    userPromptSections.push(`USER QUESTION:\n${message}`);
+
     const finalPrompt = userPromptSections.join("\n\n");
-    console.log(`[chat-ai-assistant] Context layers token count: ${estimateTokens(finalPrompt)}`);
+    console.log(`[chat-ai-assistant] Final prompt token count after all truncations: ${countTokens(finalPrompt)}`);
 
     const chatResponse = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
