@@ -75,11 +75,12 @@ serve(async (req) => {
     let effectiveProjectId = projectId;
     let effectiveStepId = stepId;
     let effectiveDraftText = draftText ?? "";
+    let documentSummaryForQuery: string | undefined;
 
     if (documentId) {
       const { data: documentData, error: documentError } = await supabaseClient
         .from("documents")
-        .select("project_id, step_id, content")
+        .select("project_id, step_id, content, summary") // Fetch summary here
         .eq("id", documentId)
         .maybeSingle();
 
@@ -90,6 +91,7 @@ serve(async (req) => {
       effectiveProjectId = documentData.project_id;
       effectiveStepId = documentData.step_id ?? effectiveStepId;
       effectiveDraftText = draftText ?? documentData.content ?? "";
+      documentSummaryForQuery = typeof documentData.summary === "string" ? documentData.summary : undefined;
     }
 
     if (!effectiveProjectId || !effectiveStepId) {
@@ -133,8 +135,26 @@ serve(async (req) => {
 
     const step = stepData as StepRecord;
 
-    const embeddingVector = await createQueryEmbedding(openAIKeyResult.key, buildEmbeddingPrompt(trimmedDraft, step));
-    const memoryMatches = await retrieveMemories(supabaseClient, effectiveProjectId, embeddingVector);
+    // Determine query text for relevant decisions: use document summary if available, else draft text
+    const queryTextForDecisions = documentSummaryForQuery && documentSummaryForQuery.trim() !== ""
+      ? documentSummaryForQuery
+      : trimmedDraft;
+
+    // Call retrieve-relevant-decisions Edge Function
+    const { data: relevantDecisionsData, error: relevantDecisionsError } = await supabaseClient.functions.invoke('retrieve-relevant-decisions', {
+      body: { projectId: effectiveProjectId, queryText: queryTextForDecisions },
+      headers: {
+        Authorization: authHeader,
+      },
+    });
+
+    let memoryMatches: MemoryMatch[] = [];
+    if (relevantDecisionsError) {
+      console.error("Error invoking retrieve-relevant-decisions:", relevantDecisionsError);
+      // Proceed with empty memories if there's an error
+    } else if (relevantDecisionsData?.results) {
+      memoryMatches = relevantDecisionsData.results as MemoryMatch[];
+    }
 
     const reviewPrompt = buildReviewPrompt({
       projectProfile,
@@ -364,9 +384,10 @@ function buildReviewPrompt({
   const parts = [
     `PROJECT PROFILE:\n${projectProfile}`,
     `CURRENT STEP:\n${formatStepDefinition(step)}`,
-    `RELEVANT PAST DECISIONS:\n${formatMemories(memories)}`,
+    `PREVIOUS BRAND DECISIONS TO CONSIDER:\n${formatMemories(memories)}`, // New section
     `CURRENT DRAFT:\n${draft}`,
-    "TASK:\nReview the draft against the project profile, step goal, and past decisions.",
+    "TASK:\nReview the draft against the project profile, the current step's goal, and the previous brand decisions.",
+    "Specifically flag any inconsistencies or conflicts between the current draft and the 'PREVIOUS BRAND DECISIONS TO CONSIDER' section.", // Enhanced instruction
     "Return strict JSON with keys:",
     `{
   "summary": string (<=40 words),
