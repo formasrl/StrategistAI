@@ -1,22 +1,21 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
-import { Step, Document, AiReview } from '@/types/supabase';
+import { Step, AiReview } from '@/types/supabase';
 import { showError, showSuccess } from '@/utils/toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Lightbulb, Loader2 } from 'lucide-react';
-import DocumentEditor from './DocumentEditor'; // Re-use the existing DocumentEditor
+import DocumentEditor from './DocumentEditor';
 
-// Define the type for the Outlet context, similar to Dashboard
 interface StepWorkspaceOutletContext {
   setAiReview: (review: AiReview | null) => void;
   setIsAiReviewLoading: (isLoading: boolean) => void;
-  setDocumentIdForAiPanel: (docId: string | undefined) => void; // New: to update AiPanel's document context
-  setStepIdForAiPanel: (stepId: string | undefined) => void; // New: to update AiPanel's step context
-  aiReview: AiReview | null; // New: receive current AI review from Dashboard
-  isAiReviewLoading: boolean; // New: receive current AI review loading state from Dashboard
+  setDocumentIdForAiPanel: (docId: string | undefined) => void;
+  setStepIdForAiPanel: (stepId: string | undefined) => void;
+  aiReview: AiReview | null;
+  isAiReviewLoading: boolean;
 }
 
 const StepWorkspace: React.FC = () => {
@@ -27,34 +26,27 @@ const StepWorkspace: React.FC = () => {
   const [primaryDocumentId, setPrimaryDocumentId] = useState<string | undefined>(undefined);
   const [isLoadingDocument, setIsLoadingDocument] = useState(true);
 
-  // Get context from DashboardLayout
   const {
     setAiReview,
     setIsAiReviewLoading,
     setDocumentIdForAiPanel,
     setStepIdForAiPanel,
-    aiReview, // Destructure current AI review from context
-    isAiReviewLoading, // Destructure current AI review loading state from context
   } = useOutletContext<StepWorkspaceOutletContext>();
 
-  // Set the stepId for the AI panel when this workspace is active
   useEffect(() => {
     setStepIdForAiPanel(stepId);
     return () => {
-      setStepIdForAiPanel(undefined); // Clear when unmounting
+      setStepIdForAiPanel(undefined);
     };
   }, [stepId, setStepIdForAiPanel]);
 
-  // Set the documentId for the AI panel when the primary document is loaded/created
   useEffect(() => {
     setDocumentIdForAiPanel(primaryDocumentId);
     return () => {
-      setDocumentIdForAiPanel(undefined); // Clear when unmounting
+      setDocumentIdForAiPanel(undefined);
     };
   }, [primaryDocumentId, setDocumentIdForAiPanel]);
 
-
-  // Fetch step details and its primary document
   useEffect(() => {
     const fetchStepAndDocument = async () => {
       if (!stepId || !projectId) {
@@ -66,7 +58,6 @@ const StepWorkspace: React.FC = () => {
       setIsLoadingStep(true);
       setIsLoadingDocument(true);
 
-      // Fetch step details
       const { data: stepData, error: stepError } = await supabase
         .from('steps')
         .select('*')
@@ -83,7 +74,6 @@ const StepWorkspace: React.FC = () => {
       setStep(stepData);
       setIsLoadingStep(false);
 
-      // Find or create the primary document for this step
       const { data: existingDocuments, error: docError } = await supabase
         .from('documents')
         .select('id')
@@ -99,17 +89,20 @@ const StepWorkspace: React.FC = () => {
       if (existingDocuments && existingDocuments.length > 0) {
         setPrimaryDocumentId(existingDocuments[0].id);
       } else {
-        // No document found, create a new one
         const newDocumentName = `${stepData.step_name} Document`;
-        const { data: newDocData, error: createDocError } = await supabase.from('documents').insert({
-          project_id: projectId,
-          step_id: stepId,
-          document_name: newDocumentName,
-          content: '',
-          status: 'draft',
-          current_version: 1,
-          document_type: 'input', // Default type
-        }).select('id').single();
+        const { data: newDocData, error: createDocError } = await supabase
+          .from('documents')
+          .insert({
+            project_id: projectId,
+            step_id: stepId,
+            document_name: newDocumentName,
+            content: '',
+            status: 'draft',
+            current_version: 1,
+            document_type: 'input',
+          })
+          .select('id')
+          .single();
 
         if (createDocError) {
           showError(`Failed to create initial document for step: ${createDocError.message}`);
@@ -123,7 +116,7 @@ const StepWorkspace: React.FC = () => {
     };
 
     fetchStepAndDocument();
-  }, [projectId, stepId, navigate, setDocumentIdForAiPanel, setStepIdForAiPanel]);
+  }, [projectId, stepId, setDocumentIdForAiPanel, setStepIdForAiPanel]);
 
   if (isLoadingStep || isLoadingDocument) {
     return (
@@ -147,7 +140,6 @@ const StepWorkspace: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full space-y-4">
-      {/* Guidance Panel */}
       <Card className="w-full">
         <CardHeader className="flex flex-row items-center space-x-2 p-4 pb-2">
           <Lightbulb className="h-5 w-5 text-blue-500" />
@@ -166,7 +158,6 @@ const StepWorkspace: React.FC = () => {
               <p>{step.why_matters}</p>
             </div>
           )}
-          {/* Add more guidance elements as per requirements (output, template, questions, examples) */}
           <div>
             <h3 className="font-semibold text-foreground">Guiding Questions:</h3>
             <ul className="list-disc pl-5">
@@ -182,16 +173,12 @@ const StepWorkspace: React.FC = () => {
         </CardContent>
       </Card>
 
-      {/* Document Editor */}
       {primaryDocumentId ? (
         <DocumentEditor
           projectId={projectId}
           documentId={primaryDocumentId}
-          // Pass down the AI review setters and current state to DocumentEditor
           setAiReview={setAiReview}
           setIsAiReviewLoading={setIsAiReviewLoading}
-          aiReview={aiReview}
-          isAiReviewLoading={isAiReviewLoading}
         />
       ) : (
         <div className="text-center text-muted-foreground p-8">
