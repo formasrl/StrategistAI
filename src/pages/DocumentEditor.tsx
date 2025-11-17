@@ -1,25 +1,13 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Document, AiReview } from '@/types/supabase';
 import { showError, showSuccess } from '@/utils/toast';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Button } from '@/components/ui/button';
-import { Save, Loader2, RotateCcw, Trash2, UploadCloud, Link2Off } from 'lucide-react';
 import DocumentVersionList from '@/components/documents/DocumentVersionList';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from '@/components/ui/alert-dialog';
-import { Badge } from '@/components/ui/badge';
+import DocumentHeader from '@/components/documents/DocumentHeader';
+import DocumentToolbar from '@/components/documents/DocumentToolbar';
 
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
@@ -107,6 +95,43 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
   const [viewingVersionNumber, setViewingVersionNumber] = useState<number | null>(null);
 
   const isPublished = status === ('published' as Document['status']);
+  const isHistoricalView = viewingVersionContent !== null;
+
+  const versionLabel = useMemo(() => {
+    const versionToDisplay = viewingVersionNumber ?? document?.current_version ?? '—';
+    return `Version: ${versionToDisplay}`;
+  }, [viewingVersionNumber, document?.current_version]);
+
+  const modules = useMemo(
+    () => ({
+      toolbar: [
+        [{ header: [1, 2, false] }],
+        ['bold', 'italic', 'underline', 'strike', 'blockquote'],
+        [{ list: 'ordered' }, { list: 'bullet' }],
+        [{ indent: '-1' }, { indent: '+1' }],
+        ['link', 'image'],
+        ['clean'],
+      ],
+    }),
+    [],
+  );
+
+  const formats = useMemo(
+    () => [
+      'header',
+      'bold',
+      'italic',
+      'underline',
+      'strike',
+      'blockquote',
+      'list',
+      'bullet',
+      'indent',
+      'link',
+      'image',
+    ],
+    [],
+  );
 
   const syncDocumentMemory = useCallback(
     async (action: 'publish' | 'disconnect'): Promise<{ ok: boolean; message?: string }> => {
@@ -217,7 +242,7 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
   };
 
   const handlePublish = async () => {
-    if (!document || isPublishing || !!viewingVersionContent || isPublished) return;
+    if (!document || isPublishing || isHistoricalView || isPublished) return;
 
     setIsPublishing(true);
     const { error } = await supabase
@@ -251,7 +276,7 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
   };
 
   const handleDisconnect = async () => {
-    if (!document || isDisconnecting || !isPublished) return;
+    if (!document || isDisconnecting || isHistoricalView || !isPublished) return;
 
     setIsDisconnecting(true);
     const { error } = await supabase
@@ -323,31 +348,6 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
     showSuccess('Switched back to the latest document version.');
   };
 
-  const modules = {
-    toolbar: [
-      [{ header: [1, 2, false] }],
-      ['bold', 'italic', 'underline', 'strike', 'blockquote'],
-      [{ list: 'ordered' }, { list: 'bullet' }],
-      [{ indent: '-1' }, { indent: '+1' }],
-      ['link', 'image'],
-      ['clean'],
-    ],
-  };
-
-  const formats = [
-    'header',
-    'bold',
-    'italic',
-    'underline',
-    'strike',
-    'blockquote',
-    'list',
-    'bullet',
-    'indent',
-    'link',
-    'image',
-  ];
-
   if (isLoadingDocument) {
     return (
       <Card className="w-full h-full flex flex-col">
@@ -370,120 +370,53 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
     );
   }
 
-  const publishDisconnectDisabled = isPublished
-    ? isDisconnecting || !!viewingVersionContent
-    : isPublishing || isSaving || !!viewingVersionContent;
+  const disableSave = isSaving || isPublished || isHistoricalView;
+  const disablePublishDisconnect = isPublished
+    ? isDisconnecting || isHistoricalView
+    : isPublishing || isSaving || isHistoricalView;
+  const disableDelete = isDeleting || isHistoricalView;
+  const showPublishedBanner = isPublished && !isHistoricalView;
 
   return (
     <div className="flex flex-col h-full space-y-4">
       <Card className="w-full flex-1 flex flex-col">
         <CardHeader className="flex flex-row items-start justify-between">
-          <div>
-            <CardTitle className="text-2xl font-bold">{document.document_name}</CardTitle>
-            <CardDescription className="text-muted-foreground">
-              Version: {viewingVersionNumber}
-              {viewingVersionContent && (
-                <span className="ml-2 text-yellow-600 dark:text-yellow-400">(Historical View)</span>
-              )}
-            </CardDescription>
-            <div className="mt-2 flex items-center gap-2">
-              <Badge
-                variant={isPublished ? 'secondary' : 'outline'}
-                className={isPublished ? 'bg-emerald-500 text-white hover:bg-emerald-500/80' : ''}
-              >
-                {isPublished ? 'Published to RAG (read-only)' : 'Editable'}
-              </Badge>
-              {!isPublished && (
-                <span className="text-xs text-muted-foreground">Use Publish to surface in RAG.</span>
-              )}
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {viewingVersionContent && (
-              <Button onClick={handleBackToLatest} variant="outline">
-                <RotateCcw className="mr-2 h-4 w-4" /> Back to Latest
-              </Button>
-            )}
-            <Button
-              onClick={handleSave}
-              disabled={isSaving || isPublished || !!viewingVersionContent}
-            >
-              {isSaving ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Saving...
-                </>
-              ) : (
-                <>
-                  <Save className="mr-2 h-4 w-4" /> Save
-                </>
-              )}
-            </Button>
-            <Button
-              onClick={isPublished ? handleDisconnect : handlePublish}
-              variant={isPublished ? 'outline' : 'secondary'}
-              disabled={publishDisconnectDisabled}
-            >
-              {isPublished ? (
-                isDisconnecting ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Disconnecting...
-                  </>
-                ) : (
-                  <>
-                    <Link2Off className="mr-2 h-4 w-4" /> Disconnect
-                  </>
-                )
-              ) : isPublishing ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Publishing...
-                </>
-              ) : (
-                <>
-                  <UploadCloud className="mr-2 h-4 w-4" /> Publish
-                </>
-              )}
-            </Button>
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="destructive" size="icon" disabled={isDeleting || !!viewingVersionContent}>
-                  {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                  <span className="sr-only">Delete Document</span>
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    This action cannot be undone. This will permanently delete this document
-                    and all its associated versions and AI reviews.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction
-                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                    onClick={handleDeleteDocument}
-                  >
-                    Delete
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          </div>
+          <DocumentHeader
+            title={document.document_name}
+            versionLabel={versionLabel}
+            isHistoricalView={isHistoricalView}
+            isPublished={isPublished}
+          />
+          <DocumentToolbar
+            showBackButton={isHistoricalView}
+            onBackToLatest={handleBackToLatest}
+            isSaving={isSaving}
+            onSave={handleSave}
+            disableSave={disableSave}
+            isPublished={isPublished}
+            onPublish={handlePublish}
+            onDisconnect={handleDisconnect}
+            isPublishing={isPublishing}
+            isDisconnecting={isDisconnecting}
+            disablePublishDisconnect={disablePublishDisconnect}
+            onDelete={handleDeleteDocument}
+            isDeleting={isDeleting}
+            disableDelete={disableDelete}
+          />
         </CardHeader>
         <CardContent className="flex-1 flex flex-col p-6 pt-0">
-          {isPublished && !viewingVersionContent && (
+          {showPublishedBanner && (
             <div className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200">
               This document is published to RAG and locked for edits. Use “Disconnect” to make changes again.
             </div>
           )}
           <ReactQuill
             theme="snow"
-            value={viewingVersionContent !== null ? viewingVersionContent : content}
+            value={isHistoricalView ? viewingVersionContent ?? '' : content}
             onChange={setContent}
             modules={modules}
             formats={formats}
-            readOnly={!!viewingVersionContent || isPublished}
+            readOnly={isHistoricalView || isPublished}
             placeholder="Start writing your document here..."
             className="flex-1 min-h-[300px] flex flex-col"
           />
