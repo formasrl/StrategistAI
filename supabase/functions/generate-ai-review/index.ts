@@ -64,12 +64,10 @@ interface StepRecord {
 }
 
 interface MemoryMatch {
-  document_id: string;
-  step_id: string | null;
-  title: string;
+  step_name: string;
+  document_name: string;
   summary: string;
   key_decisions: string[] | null;
-  tags: string[] | null;
   distance: number;
 }
 
@@ -179,6 +177,7 @@ serve(async (req) => {
       ? documentSummaryForQuery
       : trimmedDraft;
 
+    // Retrieve relevant decisions from project memory
     const { data: relevantDecisionsData, error: relevantDecisionsError } = await supabaseClient.functions.invoke('retrieve-relevant-decisions', {
       body: { projectId: effectiveProjectId, queryText: queryTextForDecisions },
       headers: {
@@ -204,7 +203,7 @@ serve(async (req) => {
       reviewSystemPromptTokens +
       countTokens(currentProjectProfile) +
       countTokens(currentStepDefinition) +
-      countTokens(currentMemoriesText) +
+      countTokens(currentMemoriesText) + // Include memories in token count
       countTokens(trimmedDraft);
 
     console.log(`[generate-ai-review] Initial prompt token count: ${totalPromptTokens} for model: ${REVIEW_MODEL}`);
@@ -274,7 +273,7 @@ serve(async (req) => {
       summary?: unknown;
       strengths?: unknown;
       issues?: unknown;
-      consistency_issues?: unknown;
+      consistency_issues?: unknown; // New field
       suggestions?: unknown;
       readiness?: unknown;
       readiness_reason?: unknown;
@@ -297,7 +296,7 @@ serve(async (req) => {
       strengths: normalized.strengths,
       suggestions: normalized.suggestions,
       issues: normalized.issues,
-      consistency_issues: normalized.consistencyIssues,
+      consistency_issues: normalized.consistencyIssues, // Store new field
       summary: normalized.summary,
       readiness: normalized.readiness,
       readiness_reason: normalized.readinessReason,
@@ -315,7 +314,7 @@ serve(async (req) => {
         summary: normalized.summary,
         strengths: normalized.strengths,
         issues: normalized.issues,
-        consistency_issues: normalized.consistencyIssues,
+        consistency_issues: normalized.consistencyIssues, // Return new field
         suggestions: normalized.suggestions,
         readiness: normalized.readiness,
         readiness_reason: normalized.readinessReason,
@@ -354,8 +353,8 @@ async function resolveOpenAIApiKey(
 
   const envKey = Deno.env.get("OPENAI_API_KEY")?.trim();
   const userKey = data?.openai_api_key?.trim();
-  const key = userKey || envKey;
 
+  const key = userKey || envKey;
   if (!key) {
     return { ok: false, error: "OpenAI API key not configured. Add a key in AI Settings." };
   }
@@ -511,7 +510,7 @@ function formatMemories(memories: MemoryMatch[]): string {
       const summary = memory.summary.length > 220 ? `${memory.summary.slice(0, 217)}...` : memory.summary;
       const score = convertDistanceToScore(memory.distance);
       return [
-        `${index + 1}. ${memory.title} (relevance ${score})`,
+        `${index + 1}. ${memory.document_name} (from step: ${memory.step_name}, relevance ${score})`,
         `  Summary: ${summary}`,
         decisionsText,
       ].join("\n");
@@ -553,7 +552,7 @@ function normalizeReview(raw: {
 
   const strengths = sanitizeStringArray(raw.strengths, 7, 120);
   const issues = sanitizeStringArray(raw.issues, 7, 140);
-  const consistencyIssues = sanitizeStringArray(raw.consistency_issues, 6, 140);
+  const consistencyIssues = sanitizeStringArray(raw.consistency_issues, 6, 140); // Handle new field
   const suggestions = sanitizeStringArray(raw.suggestions, 7, 140);
 
   let readiness = typeof raw.readiness === "string" ? raw.readiness.toLowerCase().trim() : "not_ready";
