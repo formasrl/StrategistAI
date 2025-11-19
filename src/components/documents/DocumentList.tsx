@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { Document } from '@/types/supabase';
+import { Document, DocumentWithEmbedding } from '@/types/supabase'; // Import DocumentWithEmbedding
 import { showError } from '@/utils/toast';
 import DocumentCard from './DocumentCard';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -14,7 +14,7 @@ interface DocumentListProps {
 }
 
 const DocumentList: React.FC<DocumentListProps> = ({ projectId, stepId }) => {
-  const [documents, setDocuments] = useState<Document[]>([]);
+  const [documents, setDocuments] = useState<DocumentWithEmbedding[]>([]); // Use DocumentWithEmbedding
   const [isLoading, setIsLoading] = useState(true);
   const [isCreateDocumentDialogOpen, setIsCreateDocumentDialogOpen] = useState(false);
 
@@ -22,7 +22,7 @@ const DocumentList: React.FC<DocumentListProps> = ({ projectId, stepId }) => {
     setIsLoading(true);
     const { data, error } = await supabase
       .from('documents')
-      .select('*')
+      .select('*, step_embeddings(id)') // Select all document fields and the id from related step_embeddings
       .eq('step_id', stepId)
       .order('created_at', { ascending: true });
 
