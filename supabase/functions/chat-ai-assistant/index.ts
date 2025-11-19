@@ -205,6 +205,17 @@ serve(async (req) => {
 
     const queryEmbedding = await createEmbedding(openAIKeyResult.key, queryTextForSemanticSearch);
 
+    // Log embedding AI usage
+    await logAiUsage(
+      supabaseClient,
+      project.id,
+      project.user_id,
+      "chat-ai-assistant (embedding)",
+      EMBEDDING_MODEL,
+      queryTextForSemanticSearch.length,
+      queryEmbedding.length // Log dimension for embedding output length
+    );
+
     const { data: semanticMatchesData, error: rpcError } = await supabaseClient.rpc(
       "search_document_embeddings",
       {
@@ -410,6 +421,18 @@ serve(async (req) => {
 
     const completion = await chatResponse.json();
     const reply = completion?.choices?.[0]?.message?.content?.trim();
+
+    // Log chat completion AI usage
+    await logAiUsage(
+      supabaseClient,
+      project.id,
+      project.user_id,
+      "chat-ai-assistant (chat)",
+      CHAT_MODEL,
+      finalPrompt.length,
+      reply?.length ?? 0
+    );
+
     if (!reply) {
       return respond({ error: "AI response was empty." }, 500);
     }
@@ -637,4 +660,26 @@ function sanitizeLine(value: string | null, fallback: string): string {
   if (!value) return fallback;
   const trimmed = value.trim();
   return trimmed ? trimmed : fallback;
+}
+
+async function logAiUsage(
+  supabaseClient: ReturnType<typeof createClient>,
+  projectId: string,
+  userId: string,
+  functionName: string,
+  model: string,
+  inputLength: number,
+  outputLength: number,
+) {
+  const { error } = await supabaseClient.from("ai_usage_log").insert({
+    project_id: projectId,
+    user_id: userId,
+    function_name: functionName,
+    model: model,
+    input_length: inputLength,
+    output_length: outputLength,
+  });
+  if (error) {
+    console.error("Failed to log AI usage:", error);
+  }
 }

@@ -68,6 +68,17 @@ serve(async (req) => {
 
     const queryEmbedding = await createEmbedding(openAIKeyResult.key, queryText);
 
+    // Log AI usage
+    await logAiUsage(
+      supabaseClient,
+      projectData.id,
+      projectData.user_id,
+      "retrieve-relevant-decisions",
+      EMBEDDING_MODEL,
+      queryText.length,
+      queryEmbedding.length // Log dimension for embedding output length
+    );
+
     // RPC call already filters by input_project_id
     const { data: matches, error: rpcError } = await supabaseClient.rpc("match_step_memories", {
       input_project_id: projectId,
@@ -166,4 +177,26 @@ async function createEmbedding(apiKey: string, text: string): Promise<number[]> 
   }
 
   return vector.map((value: number) => Number(value));
+}
+
+async function logAiUsage(
+  supabaseClient: ReturnType<typeof createClient>,
+  projectId: string,
+  userId: string,
+  functionName: string,
+  model: string,
+  inputLength: number,
+  outputLength: number,
+) {
+  const { error } = await supabaseClient.from("ai_usage_log").insert({
+    project_id: projectId,
+    user_id: userId,
+    function_name: functionName,
+    model: model,
+    input_length: inputLength,
+    output_length: outputLength,
+  });
+  if (error) {
+    console.error("Failed to log AI usage:", error);
+  }
 }

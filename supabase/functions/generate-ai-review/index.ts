@@ -269,6 +269,17 @@ serve(async (req) => {
     const reviewPayload = await reviewResponse.json();
     const rawContent = reviewPayload?.choices?.[0]?.message?.content ?? "{}";
 
+    // Log AI usage
+    await logAiUsage(
+      supabaseClient,
+      project.id,
+      project.user_id,
+      "generate-ai-review",
+      REVIEW_MODEL,
+      reviewPrompt.length,
+      rawContent.length
+    );
+
     let parsedReview: {
       summary?: unknown;
       strengths?: unknown;
@@ -593,4 +604,26 @@ function sanitizeStringArray(value: unknown, maxItems: number, maxLength: number
     .map((item) => (item.length > maxLength ? `${item.slice(0, maxLength - 3)}...` : item));
 
   return cleaned;
+}
+
+async function logAiUsage(
+  supabaseClient: ReturnType<typeof createClient>,
+  projectId: string,
+  userId: string,
+  functionName: string,
+  model: string,
+  inputLength: number,
+  outputLength: number,
+) {
+  const { error } = await supabaseClient.from("ai_usage_log").insert({
+    project_id: projectId,
+    user_id: userId,
+    function_name: functionName,
+    model: model,
+    input_length: inputLength,
+    output_length: outputLength,
+  });
+  if (error) {
+    console.error("Failed to log AI usage:", error);
+  }
 }

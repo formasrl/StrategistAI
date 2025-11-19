@@ -86,6 +86,17 @@ serve(async (req) => {
 
     const embeddingVector = await createEmbedding(openAIKeyResult.key, combinedText);
 
+    // Log AI usage
+    await logAiUsage(
+      supabaseClient,
+      project.id,
+      project.user_id,
+      "generate-step-embedding",
+      EMBEDDING_MODEL,
+      combinedText.length,
+      embeddingVector.length // Log dimension for embedding output length
+    );
+
     const { data: upsertData, error: upsertError } = await supabaseClient
       .from("step_embeddings")
       .upsert(
@@ -181,4 +192,26 @@ async function createEmbedding(apiKey: string, text: string): Promise<number[]> 
   }
 
   return vector.map((value: number) => Number(value));
+}
+
+async function logAiUsage(
+  supabaseClient: ReturnType<typeof createClient>,
+  projectId: string,
+  userId: string,
+  functionName: string,
+  model: string,
+  inputLength: number,
+  outputLength: number,
+) {
+  const { error } = await supabaseClient.from("ai_usage_log").insert({
+    project_id: projectId,
+    user_id: userId,
+    function_name: functionName,
+    model: model,
+    input_length: inputLength,
+    output_length: outputLength,
+  });
+  if (error) {
+    console.error("Failed to log AI usage:", error);
+  }
 }

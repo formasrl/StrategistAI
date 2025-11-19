@@ -94,6 +94,9 @@ serve(async (req) => {
       "No key decisions captured yet.",
     ];
 
+    let inputLength = trimmedContent.length;
+    let outputLength = 0;
+
     if (trimmedContent.length > 0) {
       try {
         const generated = await generateSummaryAndDecisions(
@@ -102,6 +105,7 @@ serve(async (req) => {
         );
         summary = generated.summary;
         keyDecisions = generated.keyDecisions;
+        outputLength = summary.length + keyDecisions.join("").length;
       } catch (error) {
         console.error("OpenAI summary generation failed", error);
         return respond(
@@ -110,6 +114,17 @@ serve(async (req) => {
         );
       }
     }
+
+    // Log AI usage
+    await logAiUsage(
+      supabaseClient,
+      project.id,
+      project.user_id,
+      "generate-step-summary",
+      SUMMARY_MODEL,
+      inputLength,
+      outputLength
+    );
 
     const { error: updateError } = await supabaseClient
       .from("documents")
@@ -297,4 +312,26 @@ function sanitizeKeyDecisions(value: unknown): string[] {
   }
 
   return cleaned;
+}
+
+async function logAiUsage(
+  supabaseClient: ReturnType<typeof createClient>,
+  projectId: string,
+  userId: string,
+  functionName: string,
+  model: string,
+  inputLength: number,
+  outputLength: number,
+) {
+  const { error } = await supabaseClient.from("ai_usage_log").insert({
+    project_id: projectId,
+    user_id: userId,
+    function_name: functionName,
+    model: model,
+    input_length: inputLength,
+    output_length: outputLength,
+  });
+  if (error) {
+    console.error("Failed to log AI usage:", error);
+  }
 }

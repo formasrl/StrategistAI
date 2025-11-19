@@ -115,8 +115,37 @@ serve(async (req) => {
         // Filter by project_id to ensure data isolation
         await supabaseClient.from("project_document_embeddings").delete().eq("document_id", documentId).eq("project_id", documentData.project_id);
       } else {
+        const summaryInput = `Document Title: ${documentData.document_name}\n\nDocument Content:\n${trimmedContent}`;
         summaryData = await generateSummary(openAIKeyResult.key, documentData.document_name, trimmedContent, fallbackTags);
+        
+        // Log summary AI usage
+        await logAiUsage(
+          supabaseClient,
+          projectInfo.id,
+          projectInfo.user_id,
+          "process-document-publish (summary)",
+          SUMMARIZATION_MODEL,
+          summaryInput.length,
+          summaryData.summary.length + summaryData.keyDecisions.join("").length + summaryData.tags.join("").length
+        );
+
+        const embeddingInput = [
+          summaryData.summary,
+          "Key Decisions:",
+          ...summaryData.keyDecisions.map((decision) => `- ${decision}`),
+        ].join("\n");
         const embeddingVector = await createEmbedding(openAIKeyResult.key, summaryData.summary, summaryData.keyDecisions);
+
+        // Log embedding AI usage
+        await logAiUsage(
+          supabaseClient,
+          projectInfo.id,
+          projectInfo.user_id,
+          "process-document-publish (embedding)",
+          EMBEDDING_MODEL,
+          embeddingInput.length,
+          embeddingVector.length // Log dimension for embedding output length
+        );
 
         // Filter by project_id to ensure data isolation
         const { error: upsertError } = await supabaseClient
@@ -428,4 +457,26 @@ function extractSingle<T>(relation: unknown): T | null {
     return (relation[0] as T) ?? null;
   }
   return relation as T;
+}
+
+async function logAiUsage(
+  supabaseClient: ReturnType<typeof createClient>,
+  projectId: string,
+  userId: string,
+  functionName: string,
+  model: string,
+  inputLength: number,
+  outputLength: number,
+) {
+  const { error } = await supabaseClient.from("ai_usage_log").insert({
+    project_id: projectId,
+    user_id: userId,
+    function_name: functionName,
+    model: model,
+    input_length: inputLength,
+    output_length: outputLength,
+  });
+  if (error) {
+    console.error("Failed to log AI usage:", error);
+  }
 }

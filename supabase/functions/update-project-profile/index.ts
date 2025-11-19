@@ -119,6 +119,17 @@ serve(async (req) => {
     const completion = await chatResponse.json();
     const generatedProfile = completion?.choices?.[0]?.message?.content?.trim();
 
+    // Log AI usage
+    await logAiUsage(
+      supabaseClient,
+      project.id,
+      project.user_id,
+      "update-project-profile",
+      PROFILE_GENERATION_MODEL,
+      profilePrompt.length,
+      generatedProfile?.length ?? 0
+    );
+
     if (!generatedProfile) {
       return respond({ error: "AI did not return a profile summary." }, 500);
     }
@@ -211,4 +222,26 @@ function buildProfileGenerationPrompt(project: ProjectRecord, foundationalKeyDec
   }
 
   return parts.join("\n");
+}
+
+async function logAiUsage(
+  supabaseClient: ReturnType<typeof createClient>,
+  projectId: string,
+  userId: string,
+  functionName: string,
+  model: string,
+  inputLength: number,
+  outputLength: number,
+) {
+  const { error } = await supabaseClient.from("ai_usage_log").insert({
+    project_id: projectId,
+    user_id: userId,
+    function_name: functionName,
+    model: model,
+    input_length: inputLength,
+    output_length: outputLength,
+  });
+  if (error) {
+    console.error("Failed to log AI usage:", error);
+  }
 }
