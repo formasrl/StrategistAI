@@ -98,7 +98,7 @@ const PhaseCard: React.FC<PhaseCardProps> = ({ phase, projectId, onPhaseUpdated 
   };
 
   return (
-    <Card className="mb-4" id={`tour-phases-steps-${phase.id}`}> {/* Add ID for the tour */}
+    <Card className="tour-phase-card mb-4" id={`tour-phases-steps-${phase.id}`}>
       <Collapsible open={isOpen} onOpenChange={setIsOpen}>
         <CardHeader className="p-4 pb-2">
           <CollapsibleTrigger asChild>
@@ -109,7 +109,6 @@ const PhaseCard: React.FC<PhaseCardProps> = ({ phase, projectId, onPhaseUpdated 
               <div className="flex items-center gap-2">
                 {getStatusBadge(currentPhase.status)}
                 <Button variant="ghost" size="sm" className="p-2">
-                  {/* Wrap children in a span to ensure a single React element child */}
                   <span>
                     {isOpen ? (
                       <ChevronDown className="h-4 w-4 transition-transform duration-200" />
@@ -127,7 +126,6 @@ const PhaseCard: React.FC<PhaseCardProps> = ({ phase, projectId, onPhaseUpdated 
               {currentPhase.description}
             </CardDescription>
           )}
-          {/* Moved Progress out of CardDescription to fix HTML nesting warning */}
           <div className="mt-2">
             <Progress value={currentPhase.completion_percentage} className="h-2" />
             <span className="text-sm text-muted-foreground mt-1 block">

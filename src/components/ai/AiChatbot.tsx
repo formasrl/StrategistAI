@@ -5,6 +5,7 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/componen
 import { MessageCircle, Send, Loader2, Bot, User, ChevronDown, ChevronUp, BookOpen } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { supabase } from '@/integrations/supabase/client';
+import { useSession } from '@/integrations/supabase/SessionContextProvider';
 import { showError } from '@/utils/toast';
 import { cn } from '@/lib/utils';
 import {
@@ -12,7 +13,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
-import { Link } from 'react-router-dom'; // Import Link for navigation
+import { Link } from 'react-router-dom';
 
 interface ChatSource {
   document_name: string;
@@ -36,6 +37,7 @@ interface AiChatbotProps {
 }
 
 const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, documentId }) => {
+  const { session } = useSession();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
@@ -48,7 +50,6 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
 
   useEffect(scrollToBottom, [messages]);
 
-  // Helper to render markdown-style links
   const renderMessageContent = useCallback((text: string) => {
     const parts: React.ReactNode[] = [];
     const regex = /\[([^\]]+)\]\(([^)]+)\)/g;
@@ -76,12 +77,17 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
   }, []);
 
   const sendToAiAssistant = async (userMessageText: string) => {
+    if (!session?.access_token) {
+      showError('Authentication session missing. Please refresh.');
+      return;
+    }
+
     const aiPlaceholderMessage: ChatMessage = {
       id: (Date.now() + 1).toString(),
       sender: 'ai',
-      text: '', // Empty text to start streaming into
+      text: '',
       timestamp: new Date().toISOString(),
-      sources: [], // Placeholder for sources
+      sources: [],
     };
     setMessages((prev) => [...prev, aiPlaceholderMessage]);
 
@@ -92,7 +98,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${supabase.auth.session()?.access_token}`,
+            Authorization: `Bearer ${session.access_token}`,
           },
           body: JSON.stringify({
             message: userMessageText,
@@ -200,7 +206,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
       const suggestedSteps = allSteps.filter(step =>
         step.step_name?.toLowerCase().includes(lowerCaseQuery) ||
         step.description?.toLowerCase().includes(lowerCaseQuery)
-      ).slice(0, 3); // Limit to top 3 suggestions
+      ).slice(0, 3);
 
       if (suggestedSteps.length > 0) {
         aiResponseText += "\n\nPerhaps you're looking for one of these steps? Click on a step to navigate to its workspace:";
@@ -245,10 +251,8 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
     setIsSending(true);
 
     if (!stepId && !documentId) {
-      // User is chatting at project level without a specific step/document
       await handleProjectLevelChat(userMessageText);
     } else {
-      // User is chatting with a specific step/document, proceed with AI assistant
       await sendToAiAssistant(userMessageText);
     }
     setIsSending(false);
@@ -364,7 +368,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
       <CardFooter className="p-4 pt-2 border-t border-border">
         <form onSubmit={handleSendMessage} className="flex w-full space-x-2">
           <Input
-            id="tour-ai-chat-input" // ID for the tour
+            id="tour-ai-chat-input"
             placeholder="Ask your AI assistant..."
             value={inputMessage}
             onChange={(e) => setInputMessage(e.target.value)}

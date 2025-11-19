@@ -1,11 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-};
+import { corsHeaders } from "../_shared/cors.ts";
+import { respond, resolveOpenAIApiKey, logAiUsage } from "../_shared/utils.ts";
 
 const SUMMARY_MODEL = Deno.env.get("STRATEGIST_SUMMARY_MODEL") ?? "gpt-4o-mini";
 
@@ -49,19 +45,17 @@ serve(async (req) => {
       { global: { headers: { Authorization: authHeader } } },
     );
 
-    // Filter by project_id to ensure data isolation
     const { data: documentData, error: documentError } = await supabaseClient
       .from("documents")
       .select("id, project_id, content, projects(id, user_id)")
       .eq("id", step_document_id)
-      .eq("project_id", project_id) // Ensure document belongs to the project
+      .eq("project_id", project_id)
       .maybeSingle<DocumentRecord>();
 
     if (documentError || !documentData) {
       return respond({ error: "Document not found or accessible within this project." }, 404);
     }
 
-    // Additional validation: ensure document's project_id matches the provided project_id
     if (documentData.project_id !== project_id) {
       return respond(
         { error: "Document does not belong to the provided project." },
@@ -115,7 +109,6 @@ serve(async (req) => {
       }
     }
 
-    // Log AI usage
     await logAiUsage(
       supabaseClient,
       project.id,
@@ -143,7 +136,6 @@ serve(async (req) => {
       );
     }
 
-    // --- NEW: Trigger generate-step-embedding after successful summary update ---
     try {
       const { error: embeddingError } = await supabaseClient.functions.invoke('generate-step-embedding', {
         body: {
@@ -151,18 +143,16 @@ serve(async (req) => {
           project_id: documentData.project_id,
         },
         headers: {
-          Authorization: authHeader, // Pass the original Authorization header
+          Authorization: authHeader,
         },
       });
 
       if (embeddingError) {
         console.error('Failed to trigger generate-step-embedding:', embeddingError);
-        // Log the error but don't fail the summary function, as summary is already done.
       }
     } catch (invokeError) {
       console.error('Unexpected error invoking generate-step-embedding:', invokeError);
     }
-    // --- END NEW ---
 
     return respond({
       success: true,
@@ -177,49 +167,6 @@ serve(async (req) => {
     );
   }
 });
-
-function respond(payload: Record<string, unknown>, status = 200) {
-  return new Response(JSON.stringify(payload), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
-}
-
-async function resolveOpenAIApiKey(
-  client: ReturnType<typeof createClient>,
-  userId: string,
-): Promise<{ ok: true; key: string } | { ok: false; error: string; status?: number }> {
-  const { data, error } = await client
-    .from("user_settings")
-    .select("openai_api_key, ai_enabled")
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (error) {
-    console.error("Failed to load user settings", error);
-  }
-
-  if (data && data.ai_enabled === false) {
-    return {
-      ok: false,
-      error: "AI features are disabled for this account.",
-      status: 403,
-    };
-  }
-
-  const envKey = Deno.env.get("OPENAI_API_KEY")?.trim();
-  const userKey = data?.openai_api_key?.trim();
-  const key = userKey || envKey;
-
-  if (!key) {
-    return {
-      ok: false,
-      error: "OpenAI API key not configured. Add a key in AI Settings.",
-    };
-  }
-
-  return { ok: true, key };
-}
 
 async function generateSummaryAndDecisions(
   apiKey: string,
@@ -312,26 +259,4 @@ function sanitizeKeyDecisions(value: unknown): string[] {
   }
 
   return cleaned;
-}
-
-async function logAiUsage(
-  supabaseClient: ReturnType<typeof createClient>,
-  projectId: string,
-  userId: string,
-  functionName: string,
-  model: string,
-  inputLength: number,
-  outputLength: number,
-) {
-  const { error } = await supabaseClient.from("ai_usage_log").insert({
-    project_id: projectId,
-    user_id: userId,
-    function_name: functionName,
-    model: model,
-    input_length: inputLength,
-    output_length: outputLength,
-  });
-  if (error) {
-    console.error("Failed to log AI usage:", error);
-  }
 }

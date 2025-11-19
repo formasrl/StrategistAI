@@ -11,13 +11,12 @@ interface OnboardingTourProps {
 const OnboardingTour: React.FC<OnboardingTourProps> = ({ runTour, onTourComplete }) => {
   const { theme } = useTheme();
   const [tourSteps, setTourSteps] = useState<Step[]>([]);
-  const [tourKey, setTourKey] = useState(0); // Key to force re-render Joyride
+  const [tourKey, setTourKey] = useState(0);
 
   useEffect(() => {
-    // Define steps dynamically to ensure elements are mounted
     const steps: Step[] = [
       {
-        target: '#tour-phases-steps-1', // Target the first phase card
+        target: '.tour-phase-card',
         content: (
           <div>
             <h3 className="font-bold text-lg mb-2">Phases & Steps</h3>
@@ -74,7 +73,7 @@ const OnboardingTour: React.FC<OnboardingTourProps> = ({ runTour, onTourComplete
       },
     ];
     setTourSteps(steps);
-    setTourKey(prev => prev + 1); // Update key to re-render Joyride with new steps
+    setTourKey(prev => prev + 1);
   }, [theme]);
 
   const handleJoyrideCallback = (data: CallBackProps) => {
@@ -86,7 +85,7 @@ const OnboardingTour: React.FC<OnboardingTourProps> = ({ runTour, onTourComplete
 
   return (
     <Joyride
-      key={tourKey} // Use key to force re-render when steps change
+      key={tourKey}
       run={runTour}
       steps={tourSteps}
       continuous

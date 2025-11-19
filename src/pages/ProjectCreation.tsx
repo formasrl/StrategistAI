@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -6,7 +6,6 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useSession } from '@/integrations/supabase/SessionContextProvider';
 import { showSuccess, showError } from '@/utils/toast';
-import { initialRoadmapData } from '@/utils/initialRoadmapData'; // Import the initial roadmap data
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,7 +19,7 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Loader2 } from 'lucide-react'; // Import Loader2 icon
+import { Loader2 } from 'lucide-react';
 
 const formSchema = z.object({
   name: z.string().min(2, {
@@ -33,7 +32,23 @@ const formSchema = z.object({
 const ProjectCreation = () => {
   const { user, isLoading } = useSession();
   const navigate = useNavigate();
-  const [isSubmitting, setIsSubmitting] = useState(false); // New state for submission status
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [templates, setTemplates] = useState<any[]>([]);
+
+  useEffect(() => {
+    const fetchTemplates = async () => {
+      const { data, error } = await supabase
+        .from('project_templates')
+        .select('*');
+      
+      if (error) {
+        console.error("Error fetching templates:", error);
+      } else {
+        setTemplates(data || []);
+      }
+    };
+    fetchTemplates();
+  }, []);
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -51,7 +66,12 @@ const ProjectCreation = () => {
       return;
     }
 
-    setIsSubmitting(true); // Set submitting to true
+    if (templates.length === 0) {
+      showError('No project templates available. Please contact support.');
+      return;
+    }
+
+    setIsSubmitting(true);
 
     try {
       // 1. Create the project
@@ -72,9 +92,10 @@ const ProjectCreation = () => {
       }
 
       const newProjectId = projectData.id;
+      const templateStructure = templates[0].structure; // Use the first template for now
 
-      // 2. Seed initial phases and steps for the new project
-      for (const initialPhase of initialRoadmapData) {
+      // 2. Seed phases and steps from template
+      for (const initialPhase of templateStructure) {
         const { data: phaseData, error: phaseError } = await supabase
           .from('phases')
           .insert({
@@ -90,7 +111,6 @@ const ProjectCreation = () => {
 
         if (phaseError) {
           showError(`Failed to create phase "${initialPhase.phase_name}": ${phaseError.message}`);
-          // Optionally, you might want to delete the project and already created phases here
           return;
         }
 
@@ -112,17 +132,16 @@ const ProjectCreation = () => {
             });
 
           if (stepError) {
-            showError(`Failed to create step "${initialStep.step_name}" in phase "${initialPhase.phase_name}": ${stepError.message}`);
-            // Optionally, you might want to delete the project and already created phases/steps here
+            showError(`Failed to create step "${initialStep.step_name}": ${stepError.message}`);
             return;
           }
         }
       }
 
       showSuccess('Project and roadmap created successfully!');
-      navigate(`/dashboard/${newProjectId}`); // Redirect to the new project's dashboard
+      navigate(`/dashboard/${newProjectId}`);
     } finally {
-      setIsSubmitting(false); // Reset submitting to false
+      setIsSubmitting(false);
     }
   };
 

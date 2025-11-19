@@ -23,7 +23,7 @@ export const useAppSetup = () => {
 };
 
 const AppSetupProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user, isLoading: isSessionLoading } = useSession();
+  const { user, session, isLoading: isSessionLoading } = useSession();
   const { setTheme } = useTheme();
   const [isSetupComplete, setIsSetupComplete] = useState(false);
   const [onboardingTourCompleted, setOnboardingTourCompleted] = useState(false);
@@ -58,7 +58,7 @@ const AppSetupProvider: React.FC<{ children: React.ReactNode }> = ({ children })
             .eq('user_id', user.id)
             .single();
 
-          if (error && error.code !== 'PGRST116') { // PGRST116 means no rows found
+          if (error && error.code !== 'PGRST116') {
             console.error("Error fetching user settings for setup:", error);
           } else if (data) {
             userTheme = (data.theme as 'light' | 'dark') || 'light';
@@ -66,12 +66,8 @@ const AppSetupProvider: React.FC<{ children: React.ReactNode }> = ({ children })
           }
         }
 
-        // Apply theme
         setTheme(userTheme);
-
-        // Initialize timezone utility
         await initializeUserTimezone(user?.id);
-
         setOnboardingTourCompleted(tourStatus);
         setIsSetupComplete(true);
       }
@@ -82,10 +78,8 @@ const AppSetupProvider: React.FC<{ children: React.ReactNode }> = ({ children })
     }
   }, [user, isSessionLoading, setTheme, isSetupComplete]);
 
-  // Real-time listener for document status changes to trigger summarization
   useEffect(() => {
-    if (!user || isSessionLoading || !isSetupComplete) {
-      // Clean up any existing channel if user logs out or session is not ready
+    if (!user || !session || isSessionLoading || !isSetupComplete) {
       if (documentStatusChannelRef.current) {
         supabase.removeChannel(documentStatusChannelRef.current);
         documentStatusChannelRef.current = null;
@@ -93,7 +87,6 @@ const AppSetupProvider: React.FC<{ children: React.ReactNode }> = ({ children })
       return;
     }
 
-    // Only set up the listener once per user session
     if (!documentStatusChannelRef.current) {
       const channel = supabase
         .channel(`document_status_changes_${user.id}`)
@@ -107,15 +100,13 @@ const AppSetupProvider: React.FC<{ children: React.ReactNode }> = ({ children })
           async (payload) => {
             const oldDocument = payload.old as Document;
             const newDocument = payload.new as Document;
-
             const oldStatus = oldDocument.status;
             const newStatus = newDocument.status;
 
-            // Trigger summarization if status changes to 'complete' or 'approved'
             if (
               (newStatus === 'complete' || newStatus === 'approved') &&
-              oldStatus !== 'complete' && // Don't re-trigger if already complete
-              oldStatus !== 'approved'    // Don't re-trigger if already approved
+              oldStatus !== 'complete' &&
+              oldStatus !== 'approved'
             ) {
               console.log(`Document ${newDocument.id} status changed to ${newStatus}. Triggering summary.`);
               try {
@@ -125,7 +116,7 @@ const AppSetupProvider: React.FC<{ children: React.ReactNode }> = ({ children })
                     project_id: newDocument.project_id,
                   },
                   headers: {
-                    Authorization: `Bearer ${user.id}`, // Use user ID for auth in edge function
+                    Authorization: `Bearer ${session.access_token}`,
                   },
                 });
 
@@ -153,11 +144,10 @@ const AppSetupProvider: React.FC<{ children: React.ReactNode }> = ({ children })
         documentStatusChannelRef.current = null;
       }
     };
-  }, [user, isSessionLoading, isSetupComplete]); // Re-run effect if user or session state changes
+  }, [user, session, isSessionLoading, isSetupComplete]);
 
-  // Render children only after setup is complete to avoid initial flashes/incorrect data
   if (!isSetupComplete) {
-    return null; // Or a loading spinner if desired
+    return null;
   }
 
   return (

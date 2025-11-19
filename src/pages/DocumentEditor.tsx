@@ -7,16 +7,12 @@ import { Skeleton } from '@/components/ui/skeleton';
 import DocumentVersionList from '@/components/documents/DocumentVersionList';
 import DocumentHeader from '@/components/documents/DocumentHeader';
 import DocumentToolbar from '@/components/documents/DocumentToolbar';
-
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
-
-import mammoth from 'mammoth';
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
-import { FileUp, Loader2 } from 'lucide-react'; // Import FileUp icon
-import { Button } from '@/components/ui/button'; // Ensure Button is imported
-import StepSuggestionDialog from '@/components/documents/StepSuggestionDialog'; // Import new component
+import { FileUp, Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import StepSuggestionDialog from '@/components/documents/StepSuggestionDialog';
+import { AiReview, Document } from '@/types/supabase';
 
 type DashboardOutletContext = {
   setAiReview?: (review: AiReview | null) => void;
@@ -338,7 +334,6 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
     showSuccess('Switched back to the latest document version.');
   };
 
-  // File upload logic
   const handleUploadFileButtonClick = () => {
     if (fileInputRef.current) {
       fileInputRef.current.click();
@@ -357,12 +352,13 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
     setIsUploadingFile(true);
     const reader = new FileReader();
     let contentHtml = '';
-    let rawTextContent = ''; // To store plain text for embedding
+    let rawTextContent = '';
 
     try {
       const fileExtension = file.name.split('.').pop()?.toLowerCase();
 
       if (fileExtension === 'docx') {
+        const mammoth = await import('mammoth');
         const arrayBuffer = await file.arrayBuffer();
         const result = await mammoth.convertToHtml({ arrayBuffer });
         contentHtml = result.value;
@@ -374,29 +370,29 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
         });
         rawTextContent = new DOMParser().parseFromString(contentHtml, 'text/html').body.textContent || '';
       } else if (fileExtension === 'md') {
+        const { marked } = await import('marked');
         const markdownText = await new Promise<string>((resolve) => {
           reader.onload = (e) => resolve(e.target?.result as string);
           reader.readAsText(file);
         });
-        contentHtml = marked.parse(markdownText);
-        rawTextContent = markdownText; // Markdown text is good for embedding
+        contentHtml = await marked.parse(markdownText);
+        rawTextContent = markdownText;
       } else {
         showError('Unsupported file type. Please upload .docx, .html, or .md files.');
         return;
       }
 
-      // Sanitize HTML before inserting
+      const DOMPurify = (await import('dompurify')).default;
       const sanitizedHtml = DOMPurify.sanitize(contentHtml);
 
       if (quillRef.current) {
         const quill = quillRef.current.getEditor();
         const range = quill.getSelection(true);
         quill.clipboard.dangerouslyPasteHTML(range.index, sanitizedHtml);
-        quill.setSelection(range.index + sanitizedHtml.length, 0); // Move cursor after inserted content
-        setContent(quill.root.innerHTML); // Update local state with new content
+        quill.setSelection(range.index + sanitizedHtml.length, 0);
+        setContent(quill.root.innerHTML);
         showSuccess('File content inserted successfully!');
 
-        // Trigger step suggestion after content is loaded
         if (currentProjectId && rawTextContent.trim()) {
           await fetchStepSuggestions(currentProjectId, rawTextContent);
         }
@@ -407,7 +403,7 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
     } finally {
       setIsUploadingFile(false);
       if (fileInputRef.current) {
-        fileInputRef.current.value = ''; // Clear the file input
+        fileInputRef.current.value = '';
       }
     }
   };
@@ -420,7 +416,7 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
       const { data, error } = await supabase.functions.invoke('suggest-step', {
         body: { projectId, documentContent },
         headers: {
-          Authorization: `Bearer ${supabase.auth.session()?.access_token}`,
+          Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
         },
       });
 
@@ -459,7 +455,6 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
       showSuccess('Document re-assigned to new step successfully!');
       setDocument((prev) => (prev ? { ...prev, step_id: newStepId } : null));
       setIsSuggestionDialogOpen(false);
-      // Optionally, navigate to the new step's workspace or refresh the current view
       navigate(`/dashboard/${currentProjectId}/step/${newStepId}`);
     } catch (error: any) {
       showError(`Failed to re-assign document: ${error.message}`);
