@@ -15,6 +15,8 @@ import mammoth from 'mammoth';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { FileUp, Loader2 } from 'lucide-react'; // Import FileUp icon
+import { Button } from '@/components/ui/button'; // Ensure Button is imported
+import StepSuggestionDialog from '@/components/documents/StepSuggestionDialog'; // Import new component
 
 type DashboardOutletContext = {
   setAiReview?: (review: AiReview | null) => void;
@@ -28,6 +30,13 @@ interface DocumentEditorProps {
   documentId?: string;
   setAiReview?: (review: AiReview | null) => void;
   setIsAiReviewLoading?: (isLoading: boolean) => void;
+}
+
+interface SuggestedStep {
+  step_id: string;
+  step_name: string;
+  description: string | null;
+  score: number;
 }
 
 const DocumentEditor: React.FC<DocumentEditorProps> = ({
@@ -94,16 +103,20 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
   const [isPublishing, setIsPublishing] = useState(false);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [isUploadingFile, setIsUploadingFile] = useState(false); // New state for file upload
+  const [isUploadingFile, setIsUploadingFile] = useState(false);
 
   const [viewingVersionContent, setViewingVersionContent] = useState<string | null>(null);
   const [viewingVersionNumber, setViewingVersionNumber] = useState<number | null>(null);
 
+  const [isSuggestionDialogOpen, setIsSuggestionDialogOpen] = useState(false);
+  const [suggestedSteps, setSuggestedSteps] = useState<SuggestedStep[]>([]);
+  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
+
   const isPublished = status === ('published' as Document['status']);
   const isHistoricalView = viewingVersionContent !== null;
 
-  const quillRef = useRef<ReactQuill>(null); // Ref for ReactQuill instance
-  const fileInputRef = useRef<HTMLInputElement>(null); // Ref for hidden file input
+  const quillRef = useRef<ReactQuill>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const versionLabel = useMemo(() => {
     const versionToDisplay = viewingVersionNumber ?? document?.current_version ?? '—';
@@ -344,6 +357,7 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
     setIsUploadingFile(true);
     const reader = new FileReader();
     let contentHtml = '';
+    let rawTextContent = ''; // To store plain text for embedding
 
     try {
       const fileExtension = file.name.split('.').pop()?.toLowerCase();
@@ -352,17 +366,20 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
         const arrayBuffer = await file.arrayBuffer();
         const result = await mammoth.convertToHtml({ arrayBuffer });
         contentHtml = result.value;
+        rawTextContent = mammoth.extractRawText({ arrayBuffer }).value;
       } else if (fileExtension === 'html') {
         contentHtml = await new Promise<string>((resolve) => {
           reader.onload = (e) => resolve(e.target?.result as string);
           reader.readAsText(file);
         });
+        rawTextContent = new DOMParser().parseFromString(contentHtml, 'text/html').body.textContent || '';
       } else if (fileExtension === 'md') {
         const markdownText = await new Promise<string>((resolve) => {
           reader.onload = (e) => resolve(e.target?.result as string);
           reader.readAsText(file);
         });
         contentHtml = marked.parse(markdownText);
+        rawTextContent = markdownText; // Markdown text is good for embedding
       } else {
         showError('Unsupported file type. Please upload .docx, .html, or .md files.');
         return;
@@ -378,6 +395,11 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
         quill.setSelection(range.index + sanitizedHtml.length, 0); // Move cursor after inserted content
         setContent(quill.root.innerHTML); // Update local state with new content
         showSuccess('File content inserted successfully!');
+
+        // Trigger step suggestion after content is loaded
+        if (currentProjectId && rawTextContent.trim()) {
+          await fetchStepSuggestions(currentProjectId, rawTextContent);
+        }
       }
     } catch (error: any) {
       console.error('File upload error:', error);
@@ -390,6 +412,62 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
     }
   };
 
+  const fetchStepSuggestions = async (projectId: string, documentContent: string) => {
+    if (!projectId || !documentContent) return;
+
+    setIsLoadingSuggestions(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('suggest-step', {
+        body: { projectId, documentContent },
+        headers: {
+          Authorization: `Bearer ${supabase.auth.session()?.access_token}`,
+        },
+      });
+
+      if (error) {
+        showError(`Failed to get step suggestions: ${error.message}`);
+        setSuggestedSteps([]);
+      } else if (data && data.suggestions) {
+        setSuggestedSteps(data.suggestions);
+        setIsSuggestionDialogOpen(true);
+      }
+    } catch (error: any) {
+      console.error('Error invoking suggest-step:', error);
+      showError(`An unexpected error occurred during step suggestion: ${error.message}`);
+    } finally {
+      setIsLoadingSuggestions(false);
+    }
+  };
+
+  const handleSelectSuggestedStep = async (newStepId: string) => {
+    if (!document || isSaving) return;
+
+    setIsSaving(true);
+    try {
+      const { error } = await supabase
+        .from('documents')
+        .update({
+          step_id: newStepId,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', document.id);
+
+      if (error) {
+        throw new Error(`Failed to update document's step: ${error.message}`);
+      }
+
+      showSuccess('Document re-assigned to new step successfully!');
+      setDocument((prev) => (prev ? { ...prev, step_id: newStepId } : null));
+      setIsSuggestionDialogOpen(false);
+      // Optionally, navigate to the new step's workspace or refresh the current view
+      navigate(`/dashboard/${currentProjectId}/step/${newStepId}`);
+    } catch (error: any) {
+      showError(`Failed to re-assign document: ${error.message}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const modules = useMemo(
     () => ({
       toolbar: {
@@ -398,11 +476,11 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
           ['bold', 'italic', 'underline', 'strike', 'blockquote'],
           [{ list: 'ordered' }, { list: 'bullet' }],
           [{ indent: '-1' }, { indent: '+1' }],
-          ['link', 'image', 'uploadFile'], // Add 'uploadFile' here
+          ['link', 'image', 'uploadFile'],
           ['clean'],
         ],
         handlers: {
-          uploadFile: handleUploadFileButtonClick, // Custom handler
+          uploadFile: handleUploadFileButtonClick,
         },
       },
     }),
@@ -422,7 +500,7 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
       'indent',
       'link',
       'image',
-      'uploadFile', // Add custom format here
+      'uploadFile',
     ],
     [],
   );
@@ -466,22 +544,37 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
             isHistoricalView={isHistoricalView}
             isPublished={isPublished}
           />
-          <DocumentToolbar
-            showBackButton={isHistoricalView}
-            onBackToLatest={handleBackToLatest}
-            isSaving={isSaving}
-            onSave={handleSave}
-            disableSave={disableSave}
-            isPublished={isPublished}
-            onPublish={handlePublish}
-            onDisconnect={handleDisconnect}
-            isPublishing={isPublishing}
-            isDisconnecting={isDisconnecting}
-            disablePublishDisconnect={disablePublishDisconnect}
-            onDelete={handleDeleteDocument}
-            isDeleting={isDeleting}
-            disableDelete={disableDelete}
-          />
+          <div className="flex items-center gap-2">
+            <Button
+              id="tour-upload-document"
+              onClick={handleUploadFileButtonClick}
+              variant="outline"
+              disabled={isPublished || isHistoricalView || isUploadingFile}
+            >
+              {isUploadingFile ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <FileUp className="mr-2 h-4 w-4" />
+              )}
+              Upload File
+            </Button>
+            <DocumentToolbar
+              showBackButton={isHistoricalView}
+              onBackToLatest={handleBackToLatest}
+              isSaving={isSaving}
+              onSave={handleSave}
+              disableSave={disableSave}
+              isPublished={isPublished}
+              onPublish={handlePublish}
+              onDisconnect={handleDisconnect}
+              isPublishing={isPublishing}
+              isDisconnecting={isDisconnecting}
+              disablePublishDisconnect={disablePublishDisconnect}
+              onDelete={handleDeleteDocument}
+              isDeleting={isDeleting}
+              disableDelete={disableDelete}
+            />
+          </div>
         </CardHeader>
         <CardContent className="flex-1 flex flex-col p-6 pt-0">
           {showPublishedBanner && (
@@ -520,6 +613,17 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
           documentId={currentDocumentId}
           currentVersionNumber={document.current_version}
           onViewVersion={handleViewHistoricalVersion}
+        />
+      )}
+
+      {document && (
+        <StepSuggestionDialog
+          isOpen={isSuggestionDialogOpen}
+          onClose={() => setIsSuggestionDialogOpen(false)}
+          suggestions={suggestedSteps}
+          onSelectStep={handleSelectSuggestedStep}
+          currentStepId={document.step_id}
+          isLoading={isLoadingSuggestions}
         />
       )}
     </div>
