@@ -139,6 +139,24 @@ serve(async (req) => {
       console.error('Unexpected error invoking chunk-document:', invokeError);
     }
 
+    // Trigger generate-embeddings after chunking finishes
+    try {
+      const { error: embeddingError } = await supabaseClient.functions.invoke('generate-embeddings', {
+        body: {
+          document_id: documentData.id,
+        },
+        headers: {
+          Authorization: authHeader,
+        },
+      });
+
+      if (embeddingError) {
+        console.error('Failed to trigger generate-embeddings:', embeddingError);
+      }
+    } catch (invokeError) {
+      console.error('Unexpected error invoking generate-embeddings:', invokeError);
+    }
+
     return respond({
       success: true,
       summary,
