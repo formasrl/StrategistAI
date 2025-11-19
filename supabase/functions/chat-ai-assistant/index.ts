@@ -81,8 +81,6 @@ interface SemanticMatch {
   summary: string;
   title: string;
   tags: string[] | null;
-  chunk_preview: string; // NEW
-  relevance_score: number; // NEW
 }
 
 interface ChatMessage {
@@ -213,14 +211,7 @@ serve(async (req) => {
       top_k: 3, // Fetch top 3 relevant documents
     });
 
-    let semanticMatches: SemanticMatch[] = [];
-    if (rpcError) {
-      console.error("search_document_embeddings RPC failed", rpcError);
-    } else if (semanticMatchesData) {
-      semanticMatches = semanticMatchesData as SemanticMatch[];
-    }
-
-    let formattedSemanticMemories = formatSemanticSearchResults(semanticMatches);
+    let formattedSemanticMemories = formatSemanticSearchResults(semanticMatchesData || []);
 
     // Layer 4: Current Step Info
     const { data: stepData, error: stepError } = await supabaseClient
@@ -362,14 +353,9 @@ serve(async (req) => {
     });
 
     return respond({
-      answer: reply,
-      sources: semanticMatches.map(match => ({
-        document_name: match.document_name,
-        chunk_preview: match.chunk_preview,
-        relevance_score: match.relevance_score,
-      })),
-      chatSessionId: currentChatSessionId,
-      metadata: { history_pruned: historyPruned },
+      response: reply,
+      chatSessionId: currentChatSessionId, // Return the session ID
+      metadata: { history_pruned: historyPruned }, // New: Add metadata object
     });
   } catch (error) {
     console.error("chat-ai-assistant error", error);
@@ -483,24 +469,13 @@ function formatSemanticSearchResults(matches: SemanticMatch[]): string {
   return matches
     .map((match, index) => {
       const summary = match.summary.length > 220 ? `${match.summary.slice(0, 217)}...` : match.summary;
-      const chunkPreview = match.chunk_preview.length > 220 ? `${match.chunk_preview.slice(0, 217)}...` : match.chunk_preview;
-      const score = convertDistanceToScore(match.relevance_score);
       return [
-        `${index + 1}. Document: ${match.document_name} (relevance ${score})`,
+        `${index + 1}. Document: ${match.document_name}`,
         `  Summary: ${summary}`,
-        `  Excerpt: ${chunkPreview}`,
         match.tags && match.tags.length > 0 ? `  Tags: ${match.tags.join(", ")}` : undefined,
       ].filter(Boolean).join("\n");
     })
     .join("\n\n");
-}
-
-function convertDistanceToScore(distance: number): string {
-  if (Number.isNaN(distance) || distance <= 0) return "high";
-  if (distance < 0.6) return "high";
-  if (distance < 1.0) return "medium";
-  if (distance < 1.4) return "low";
-  return "very low";
 }
 
 function formatStepDefinition(step: StepRecord): string {

@@ -2,25 +2,18 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { MessageCircle, Send, Loader2, Bot, User, BookOpen, ChevronDown, ChevronUp } from 'lucide-react';
+import { MessageCircle, Send, Loader2, Bot, User } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { supabase } from '@/integrations/supabase/client';
 import { showError } from '@/utils/toast';
 import { cn } from '@/lib/utils';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-
-interface Source {
-  document_name: string;
-  chunk_preview: string;
-  relevance_score: number;
-}
+import { ChatMessage as DBChatMessage } from '@/types/supabase'; // Import DB ChatMessage type
 
 interface ChatMessageDisplay {
   id: string;
   sender: 'user' | 'ai';
   text: string;
   timestamp: string;
-  sources?: Source[]; // New field for sources
 }
 
 interface AiChatbotProps {
@@ -75,8 +68,6 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
             sender: msg.role === 'assistant' ? 'ai' : 'user',
             text: msg.content,
             timestamp: msg.created_at,
-            // Sources are not stored in chat_messages table, so they won't be reloaded here.
-            // They are only part of the immediate response from the edge function.
           }))
         );
       }
@@ -131,13 +122,12 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
             timestamp: new Date().toISOString(),
           },
         ]);
-      } else if (data?.answer) { // Changed from data.response to data.answer
+      } else if (data?.response) {
         // If a new session was created, update the state
         if (data.chatSessionId && data.chatSessionId !== chatSessionId) {
           setChatSessionId(data.chatSessionId);
         }
         // Re-fetch messages to get the full history including the new AI response
-        // Note: Sources are not persisted in the DB, so they are only available in the immediate response.
         const { data: updatedMessages, error: fetchError } = await supabase
           .from('chat_messages')
           .select('id, role, content, created_at')
@@ -152,31 +142,19 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
             {
               id: (Date.now() + 1).toString(),
               sender: 'ai',
-              text: data.answer,
+              text: data.response,
               timestamp: new Date().toISOString(),
-              sources: data.sources || [], // Include sources from the immediate response
             },
           ]);
         } else {
-          // Map fetched messages, and for the *last* message (the AI's current response), add sources
-          const newMessages = (updatedMessages || []).map((msg, index, arr) => {
-            if (index === arr.length - 1 && msg.role === 'assistant') {
-              return {
-                id: msg.id,
-                sender: 'ai',
-                text: msg.content,
-                timestamp: msg.created_at,
-                sources: data.sources || [], // Attach sources to the latest AI message
-              };
-            }
-            return {
+          setMessages(
+            (updatedMessages || []).map((msg) => ({
               id: msg.id,
               sender: msg.role === 'assistant' ? 'ai' : 'user',
               text: msg.content,
               timestamp: msg.created_at,
-            };
-          });
-          setMessages(newMessages);
+            }))
+          );
         }
       } else {
         setMessages((prev) => [
@@ -236,50 +214,28 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
               messages.map((msg) => (
                 <div
                   key={msg.id}
-                  className={`flex flex-col gap-2 ${
-                    msg.sender === 'user' ? 'items-end' : 'items-start'
+                  className={`flex items-start gap-3 ${
+                    msg.sender === 'user' ? 'justify-end' : 'justify-start'
                   }`}
                 >
-                  <div className={`flex items-start gap-3 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'} w-full`}>
-                    {msg.sender === 'ai' && (
-                      <Bot className="h-6 w-6 text-blue-500 flex-shrink-0 mt-1" />
+                  {msg.sender === 'ai' && (
+                    <Bot className="h-6 w-6 text-blue-500 flex-shrink-0 mt-1" />
+                  )}
+                  <div
+                    className={cn(
+                      'max-w-[80%] p-3 rounded-lg',
+                      msg.sender === 'user'
+                        ? 'bg-primary text-primary-foreground rounded-br-none'
+                        : 'bg-muted text-muted-foreground rounded-bl-none',
                     )}
-                    <div
-                      className={cn(
-                        'max-w-[80%] p-3 rounded-lg',
-                        msg.sender === 'user'
-                          ? 'bg-primary text-primary-foreground rounded-br-none'
-                          : 'bg-muted text-muted-foreground rounded-bl-none',
-                      )}
-                    >
-                      <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
-                      <span className="block text-xs opacity-70 mt-1">
-                        {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </span>
-                    </div>
-                    {msg.sender === 'user' && (
-                      <User className="h-6 w-6 text-gray-500 flex-shrink-0 mt-1" />
-                    )}
+                  >
+                    <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
+                    <span className="block text-xs opacity-70 mt-1">
+                      {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
                   </div>
-                  {msg.sender === 'ai' && msg.sources && msg.sources.length > 0 && (
-                    <Collapsible className="w-[80%] ml-9"> {/* Adjust margin to align with AI bubble */}
-                      <CollapsibleTrigger asChild>
-                        <Button variant="ghost" size="sm" className="w-full justify-start text-xs text-muted-foreground hover:text-foreground">
-                          <BookOpen className="mr-2 h-3 w-3" />
-                          {msg.sources.length} Source{msg.sources.length > 1 ? 's' : ''}
-                          <ChevronDown className="ml-auto h-3 w-3 ui-open:rotate-180 transition-transform" />
-                        </Button>
-                      </CollapsibleTrigger>
-                      <CollapsibleContent className="space-y-2 p-2 border rounded-md bg-background/50 mt-1">
-                        {msg.sources.map((source, idx) => (
-                          <div key={idx} className="text-xs text-muted-foreground border-b pb-2 last:border-b-0 last:pb-0">
-                            <p className="font-semibold text-foreground">{source.document_name}</p>
-                            <p className="italic">{source.chunk_preview}</p>
-                            <p className="text-[0.65rem] text-right opacity-80">Relevance: {source.relevance_score.toFixed(2)}</p>
-                          </div>
-                        ))}
-                      </CollapsibleContent>
-                    </Collapsible>
+                  {msg.sender === 'user' && (
+                    <User className="h-6 w-6 text-gray-500 flex-shrink-0 mt-1" />
                   )}
                 </div>
               ))
