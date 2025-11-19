@@ -23,7 +23,6 @@ const Dashboard = () => {
   const [aiPanelDocumentId, setAiPanelDocumentId] = useState<string | undefined>(documentId);
   const [aiPanelStepId, setAiPanelStepId] = useState<string | undefined>(stepId);
   const [aiPanelPhaseId, setAiPanelPhaseId] = useState<string | undefined>(undefined);
-  const [aiPanelChatSessionId, setAiPanelChatSessionId] = useState<string | undefined>(undefined); // New state for chat session ID
 
   const [activeAiReview, setActiveAiReview] = useState<AiReview | null>(null);
   const [isAiReviewLoading, setIsAiReviewLoading] = useState(false);
@@ -208,7 +207,6 @@ const Dashboard = () => {
     setIsAiReviewLoading: setIsAiReviewLoading,
     setDocumentIdForAiPanel: setAiPanelDocumentId,
     setStepIdForAiPanel: setAiPanelStepId,
-    setChatSessionIdForAiPanel: setAiPanelChatSessionId, // Pass setter for chat session ID
     aiReview: activeAiReview,
     isAiReviewLoading,
   };
@@ -255,8 +253,6 @@ const Dashboard = () => {
           aiReview={activeAiReview}
           isAiReviewLoading={isAiReviewLoading}
           onGenerateReview={handleGenerateAiReviewFromPanel}
-          chatSessionId={aiPanelChatSessionId} // Pass chat session ID
-          setChatSessionId={setAiPanelChatSessionId} // Pass setter for chat session ID
         />
       }
     />

@@ -14,7 +14,6 @@ interface StepWorkspaceOutletContext {
   setIsAiReviewLoading: (isLoading: boolean) => void;
   setDocumentIdForAiPanel: (docId: string | undefined) => void;
   setStepIdForAiPanel: (stepId: string | undefined) => void;
-  setChatSessionIdForAiPanel: (sessionId: string | undefined) => void; // New setter
 }
 
 const StepWorkspace: React.FC = () => {
@@ -24,14 +23,12 @@ const StepWorkspace: React.FC = () => {
   const [isLoadingStep, setIsLoadingStep] = useState(true);
   const [primaryDocumentId, setPrimaryDocumentId] = useState<string | undefined>(undefined);
   const [isLoadingDocument, setIsLoadingDocument] = useState(true);
-  const [chatSessionId, setChatSessionId] = useState<string | undefined>(undefined); // New state for chat session
 
   const {
     setAiReview,
     setIsAiReviewLoading,
     setDocumentIdForAiPanel,
     setStepIdForAiPanel,
-    setChatSessionIdForAiPanel, // Destructure new setter
   } = useOutletContext<StepWorkspaceOutletContext>();
 
   useEffect(() => {
@@ -47,14 +44,6 @@ const StepWorkspace: React.FC = () => {
       setDocumentIdForAiPanel(undefined);
     };
   }, [primaryDocumentId, setDocumentIdForAiPanel]);
-
-  // Pass chatSessionId to the AI panel
-  useEffect(() => {
-    setChatSessionIdForAiPanel(chatSessionId);
-    return () => {
-      setChatSessionIdForAiPanel(undefined);
-    };
-  }, [chatSessionId, setChatSessionIdForAiPanel]);
 
   useEffect(() => {
     const fetchStepAndDocument = async () => {
@@ -95,10 +84,8 @@ const StepWorkspace: React.FC = () => {
         return;
       }
 
-      let docIdToUse: string | undefined;
       if (existingDocuments && existingDocuments.length > 0) {
-        docIdToUse = existingDocuments[0].id;
-        setPrimaryDocumentId(docIdToUse);
+        setPrimaryDocumentId(existingDocuments[0].id);
       } else {
         const newDocumentName = `${stepData.step_name} Document`;
         const { data: newDocData, error: createDocError } = await supabase
@@ -120,28 +107,10 @@ const StepWorkspace: React.FC = () => {
           setIsLoadingDocument(false);
           return;
         }
-        docIdToUse = newDocData.id;
-        setPrimaryDocumentId(docIdToUse);
+        setPrimaryDocumentId(newDocData.id);
         showSuccess(`Created a new document for "${stepData.step_name}".`);
       }
       setIsLoadingDocument(false);
-
-      // Fetch existing chat session for this step/project or set to undefined
-      const { data: sessionData, error: sessionError } = await supabase
-        .from('chat_sessions')
-        .select('id')
-        .eq('project_id', projectId)
-        .eq('step_id', stepId)
-        .maybeSingle();
-
-      if (sessionError && sessionError.code !== 'PGRST116') { // PGRST116 means no rows found
-        console.error('Error fetching chat session:', sessionError);
-        setChatSessionId(undefined);
-      } else if (sessionData) {
-        setChatSessionId(sessionData.id);
-      } else {
-        setChatSessionId(undefined);
-      }
     };
 
     fetchStepAndDocument();

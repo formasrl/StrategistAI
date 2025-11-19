@@ -68,6 +68,7 @@ const PhaseCard: React.FC<PhaseCardProps> = ({ phase, projectId, onPhaseUpdated 
         .update({
           completion_percentage: newCompletionPercentage,
           status: newStatus,
+          updated_at: new Date().toISOString(),
         })
         .eq('id', currentPhase.id);
 

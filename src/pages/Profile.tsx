@@ -92,6 +92,7 @@ const Profile: React.FC = () => {
           first_name: values.first_name || null,
           last_name: values.last_name || null,
           avatar_url: values.avatar_url || null,
+          updated_at: new Date().toISOString(),
         },
         { onConflict: 'id' }
       );

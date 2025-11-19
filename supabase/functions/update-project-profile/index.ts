@@ -6,7 +6,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const PROFILE_MODEL = Deno.env.get("STRATEGIST_PROFILE_MODEL") ?? "gpt-4o-mini";
+const PROFILE_GENERATION_MODEL = Deno.env.get("STRATEGIST_PROFILE_MODEL") ?? "gpt-4o-mini";
 
 interface ProjectRecord {
   id: string;
@@ -45,10 +45,11 @@ serve(async (req) => {
       { global: { headers: { Authorization: authHeader } } }
     );
 
+    // 1. Fetch Project Details - Filter by projectId
     const { data: projectData, error: projectError } = await supabaseClient
       .from("projects")
       .select("id, user_id, name, one_liner, audience, positioning, constraints, project_profile")
-      .eq("id", projectId)
+      .eq("id", projectId) // Ensure project is the one requested
       .maybeSingle<ProjectRecord>();
 
     if (projectError || !projectData) {
@@ -57,22 +58,40 @@ serve(async (req) => {
 
     const project = projectData;
 
+    // 2. Resolve OpenAI API Key
     const openAIKeyResult = await resolveOpenAIApiKey(supabaseClient, project.user_id);
     if (!openAIKeyResult.ok) {
       return respond({ error: openAIKeyResult.error }, openAIKeyResult.status ?? 400);
     }
 
-    const { data: documentSummaries, error: summaryError } = await supabaseClient
+    // 3. Fetch Published Documents and Extract Key Decisions from foundational steps
+    // Filter by project_id to ensure data isolation
+    const { data: documents, error: documentsError } = await supabaseClient
       .from("documents")
-      .select("document_name, summary")
-      .eq("project_id", projectId)
-      .not("summary", "is", null);
+      .select("document_name, summary, key_decisions, tags")
+      .eq("project_id", projectId) // Ensure documents belong to the project
+      .eq("status", "published");
 
-    if (summaryError) {
-      console.error("Failed to load document summaries:", summaryError);
+    if (documentsError) {
+      console.error("Failed to fetch published documents:", documentsError);
+      // Continue even if no documents, profile can still be generated from project info
     }
 
-    const summaryPayload = buildSummaryPayload(documentSummaries || []);
+    const foundationalKeyDecisions: string[] = [];
+    // Define a broader set of tags that indicate foundational strategic documents
+    const relevantTags = ['audience', 'positioning', 'constraints', 'vision', 'mission', 'values', 'strategy', 'brief'];
+
+    documents?.forEach(doc => {
+      if (doc.tags && doc.key_decisions) {
+        const hasRelevantTag = doc.tags.some(tag => relevantTags.includes(tag));
+        if (hasRelevantTag) {
+          foundationalKeyDecisions.push(...doc.key_decisions);
+        }
+      }
+    });
+
+    // 4. Generate a compact project profile summary using OpenAI
+    const profilePrompt = buildProfileGenerationPrompt(project, foundationalKeyDecisions);
 
     const chatResponse = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -81,23 +100,12 @@ serve(async (req) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: PROFILE_MODEL,
-        temperature: 0.25,
-        max_tokens: 400,
+        model: PROFILE_GENERATION_MODEL,
+        temperature: 0.2,
+        max_tokens: 200, // Enough for 4-6 lines
         messages: [
-          {
-            role: "system",
-            content: [
-              "You are StrategistAI, an expert brand strategist.",
-              "You are asked to write a 4-6 line project profile that compiles the key essence of the project.",
-              "Each line should flow naturally, describe the brand’s positioning and priorities, and stay grounded in the supplied summaries.",
-              "Do not add headings, just return the 4-6 lines.",
-            ].join("\n"),
-          },
-          {
-            role: "user",
-            content: summaryPayload.prompt,
-          },
+          { role: "system", content: profileSystemPrompt },
+          { role: "user", content: profilePrompt },
         ],
       }),
     });
@@ -115,49 +123,27 @@ serve(async (req) => {
       return respond({ error: "AI did not return a profile summary." }, 500);
     }
 
-    const timestamp = new Date().toISOString();
-
+    // 5. Save to the Project's project_profile field - Filter by projectId
     const { error: updateError } = await supabaseClient
       .from("projects")
       .update({
         project_profile: generatedProfile,
-        project_profile_summary: generatedProfile,
-        updated_at: timestamp,
+        updated_at: new Date().toISOString(),
       })
-      .eq("id", projectId);
+      .eq("id", projectId); // Ensure project is the one requested
 
     if (updateError) {
       console.error("Failed to update project profile:", updateError);
       return respond({ error: "Failed to save generated project profile." }, 500);
     }
 
-    console.log(`[update-project-profile] Updated ${projectId} at ${timestamp}`);
-
-    return respond({ success: true, project_profile_summary: generatedProfile, updated_at: timestamp });
+    return respond({ success: true, project_profile: generatedProfile });
 
   } catch (error) {
     console.error("update-project-profile error", error);
     return respond({ error: "Unexpected error while updating project profile." }, 500);
   }
 });
-
-function buildSummaryPayload(documents: { document_name: string | null; summary: string | null }[]) {
-  const relevantSummaries = documents
-    .filter((doc) => doc.summary?.trim())
-    .map((doc, index) => `Document ${index + 1} (${doc.document_name || "Untitled"}): ${doc.summary?.trim()}`);
-  if (!relevantSummaries.length) {
-    relevantSummaries.push("No document summaries yet; describe the project from the stored fields.");
-  }
-  return {
-    prompt: [
-      "Project Details:",
-      "- Name: " + (documents.length ? documents[0].document_name || "Unnamed" : "Unnamed"),
-      "- Provided summaries:",
-      relevantSummaries.join("\n"),
-      "Use the available information to write a 4-6 line profile for this brand project.",
-    ].join("\n\n"),
-  };
-}
 
 function respond(payload: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(payload), {
@@ -193,4 +179,36 @@ async function resolveOpenAIApiKey(
   }
 
   return { ok: true, key };
+}
+
+function sanitizeLine(value: string | null, fallback: string): string {
+  if (!value) return fallback;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : fallback;
+}
+
+const profileSystemPrompt = [
+  "You are StrategistAI, an expert brand strategist.",
+  "Your task is to create a concise, 4-6 line project profile summary.",
+  "Focus on the brand's core identity, target audience, unique positioning, and key strategic decisions.",
+  "Do not include a title or introductory phrase. Start directly with the summary.",
+  "Ensure the summary is coherent and flows naturally.",
+].join(" ");
+
+function buildProfileGenerationPrompt(project: ProjectRecord, foundationalKeyDecisions: string[]): string {
+  const parts = [
+    `Project Name: ${sanitizeLine(project.name, "Not specified")}`,
+    `One-liner: ${sanitizeLine(project.one_liner, "Not specified")}`,
+    `Target Audience: ${sanitizeLine(project.audience, "Not specified")}`,
+    `Positioning: ${sanitizeLine(project.positioning, "Not specified")}`,
+    `Constraints: ${sanitizeLine(project.constraints, "None recorded")}`,
+  ];
+
+  if (foundationalKeyDecisions.length > 0) {
+    parts.push(`Key Foundational Decisions:\n- ${foundationalKeyDecisions.join("\n- ")}`);
+  } else {
+    parts.push("Key Foundational Decisions: None recorded yet.");
+  }
+
+  return parts.join("\n");
 }

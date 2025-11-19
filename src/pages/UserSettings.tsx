@@ -159,6 +159,7 @@ const UserSettings: React.FC = () => {
           ai_enabled: values.ai_enabled,
           theme: values.theme,
           timezone: values.timezone,
+          updated_at: new Date().toISOString(),
         },
         { onConflict: 'user_id' }
       );

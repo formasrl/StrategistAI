@@ -197,6 +197,7 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
           content: content,
           current_version: newVersionNumber,
           status: status,
+          updated_at: new Date().toISOString(),
         })
         .eq('id', document.id);
 
@@ -225,6 +226,7 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
       .from('documents')
       .update({
         status: 'published',
+        updated_at: new Date().toISOString(),
       })
       .eq('id', document.id);
 
@@ -258,6 +260,7 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
       .from('documents')
       .update({
         status: 'draft',
+        updated_at: new Date().toISOString(),
       })
       .eq('id', document.id);
 
