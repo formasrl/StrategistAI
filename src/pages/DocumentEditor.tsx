@@ -1,509 +1,73 @@
-import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
-import { showError, showSuccess } from '@/utils/toast';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import DocumentVersionList from '@/components/documents/DocumentVersionList';
 import DocumentHeader from '@/components/documents/DocumentHeader';
 import DocumentToolbar from '@/components/documents/DocumentToolbar';
-
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
-
-import mammoth from 'mammoth';
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
-import { FileUp, Loader2 } from 'lucide-react'; // Import FileUp icon
-import { Button } from '@/components/ui/button'; // Ensure Button is imported
-import StepSuggestionDialog from '@/components/documents/StepSuggestionDialog'; // Import new component
-
-type DashboardOutletContext = {
-  setAiReview?: (review: AiReview | null) => void;
-  setIsAiReviewLoading?: (isLoading: boolean) => void;
-  setDocumentIdForAiPanel?: (docId: string | undefined) => void;
-  setStepIdForAiPanel?: (stepId: string | undefined) => void;
-};
+import { useDocument } from '@/hooks/useDocument';
+import { useFileUpload } from '@/hooks/useFileUpload';
+import { Loader2, FileUp } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 interface DocumentEditorProps {
-  projectId?: string;
-  documentId?: string;
-  setAiReview?: (review: AiReview | null) => void;
-  setIsAiReviewLoading?: (isLoading: boolean) => void;
+  documentId: string;
 }
 
-interface SuggestedStep {
-  step_id: string;
-  step_name: string;
-  description: string | null;
-  score: number;
-}
-
-const DocumentEditor: React.FC<DocumentEditorProps> = ({
-  projectId: propProjectId,
-  documentId: propDocumentId,
-  setAiReview: setAiReviewProp,
-  setIsAiReviewLoading: setIsAiReviewLoadingProp,
-}) => {
-  const routeParams = useParams<{ projectId: string; documentId: string }>();
-  const currentProjectId = propProjectId ?? routeParams.projectId;
-  const currentDocumentId = propDocumentId ?? routeParams.documentId;
-  const navigate = useNavigate();
-
-  const outletContext = useOutletContext<DashboardOutletContext | undefined>();
-  const {
-    setAiReview: contextSetAiReview,
-    setIsAiReviewLoading: contextSetIsAiReviewLoading,
-    setDocumentIdForAiPanel: contextSetDocumentIdForAiPanel,
-    setStepIdForAiPanel: contextSetStepIdForAiPanel,
-  } = outletContext ?? {};
-
-  const setAiReviewFn = useCallback(
-    (review: AiReview | null) => {
-      if (setAiReviewProp) {
-        setAiReviewProp(review);
-        return;
-      }
-      contextSetAiReview?.(review);
-    },
-    [setAiReviewProp, contextSetAiReview],
-  );
-
-  const setIsAiReviewLoadingFn = useCallback(
-    (value: boolean) => {
-      if (setIsAiReviewLoadingProp) {
-        setIsAiReviewLoadingProp(value);
-        return;
-      }
-      contextSetIsAiReviewLoading?.(value);
-    },
-    [setIsAiReviewLoadingProp, contextSetIsAiReviewLoading],
-  );
-
-  useEffect(() => {
-    contextSetStepIdForAiPanel?.(undefined);
-  }, [contextSetStepIdForAiPanel]);
-
-  useEffect(() => {
-    if (currentDocumentId) {
-      contextSetDocumentIdForAiPanel?.(currentDocumentId);
-    } else {
-      contextSetDocumentIdForAiPanel?.(undefined);
-    }
-    return () => {
-      contextSetDocumentIdForAiPanel?.(undefined);
-    };
-  }, [currentDocumentId, contextSetDocumentIdForAiPanel]);
-
-  const [document, setDocument] = useState<Document | null>(null);
-  const [isLoadingDocument, setIsLoadingDocument] = useState(true);
-  const [content, setContent] = useState<string>('');
-  const [status, setStatus] = useState<Document['status']>('draft' as Document['status']);
-  const [isSaving, setIsSaving] = useState(false);
-  const [isPublishing, setIsPublishing] = useState(false);
-  const [isDisconnecting, setIsDisconnecting] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [isUploadingFile, setIsUploadingFile] = useState(false);
+const DocumentEditor: React.FC<DocumentEditorProps> = ({ documentId }) => {
+  const { document, isLoadingDocument, content, setContent, saveDocument, isSaving, updateDocumentStatus, isUpdatingStatus, deleteDocument, isDeleting } = useDocument(documentId);
 
   const [viewingVersionContent, setViewingVersionContent] = useState<string | null>(null);
   const [viewingVersionNumber, setViewingVersionNumber] = useState<number | null>(null);
 
-  const [isSuggestionDialogOpen, setIsSuggestionDialogOpen] = useState(false);
-  const [suggestedSteps, setSuggestedSteps] = useState<SuggestedStep[]>([]);
-  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
-
-  const isPublished = status === ('published' as Document['status']);
-  const isHistoricalView = viewingVersionContent !== null;
+  const {
+    isUploading,
+    fileInputRef,
+    handleFileChange,
+    triggerFileUpload,
+  } = useFileUpload(document?.id, (newContent) => {
+    setContent(content + newContent);
+  });
 
   const quillRef = useRef<ReactQuill>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (document) {
+      setContent(document.content || '');
+      setViewingVersionNumber(document.current_version || null);
+    }
+  }, [document, setContent]);
+
+  const isPublished = document?.status === 'published';
+  const isHistoricalView = viewingVersionContent !== null;
 
   const versionLabel = useMemo(() => {
     const versionToDisplay = viewingVersionNumber ?? document?.current_version ?? '—';
     return `Version: ${versionToDisplay}`;
   }, [viewingVersionNumber, document?.current_version]);
 
-  const syncDocumentMemory = useCallback(
-    async (action: 'publish' | 'disconnect'): Promise<{ ok: boolean; message?: string }> => {
-      if (!currentDocumentId) {
-        return { ok: false, message: 'Missing document identifier for memory sync.' };
-      }
-
-      const { error } = await supabase.functions.invoke('process-document-publish', {
-        body: { documentId: currentDocumentId, action },
-      });
-
-      if (error) {
-        console.error('Memory sync error', error);
-        return { ok: false, message: error.message ?? 'Unknown memory sync error.' };
-      }
-
-      return { ok: true };
-    },
-    [currentDocumentId],
-  );
-
-  const fetchDocument = useCallback(async () => {
-    if (!currentDocumentId) {
-      setIsLoadingDocument(false);
-      setDocument(null);
-      setContent('');
-      setStatus('draft' as Document['status']);
-      setViewingVersionContent(null);
-      setViewingVersionNumber(null);
-      setAiReviewFn(null);
-      setIsAiReviewLoadingFn(false);
-      return;
-    }
-
-    setIsLoadingDocument(true);
-    const { data, error } = await supabase
-      .from('documents')
-      .select('*')
-      .eq('id', currentDocumentId)
-      .single();
-
-    if (error) {
-      showError(`Failed to load document: ${error.message}`);
-      setDocument(null);
-      setContent('');
-      setStatus('draft' as Document['status']);
-      setViewingVersionContent(null);
-      setViewingVersionNumber(null);
-      setAiReviewFn(null);
-      setIsAiReviewLoadingFn(false);
-    } else {
-      setDocument(data);
-      setContent(data?.content || '');
-      setStatus((data?.status as Document['status']) || ('draft' as Document['status']));
-      setViewingVersionContent(null);
-      setViewingVersionNumber(data?.current_version || null);
-    }
-    setIsLoadingDocument(false);
-  }, [currentDocumentId, setAiReviewFn, setIsAiReviewLoadingFn]);
-
-  useEffect(() => {
-    fetchDocument();
-  }, [fetchDocument]);
-
-  const handleSave = async () => {
-    if (!document || isSaving || isPublished) return;
-
-    setIsSaving(true);
-    try {
-      const newVersionNumber = (document.current_version || 0) + 1;
-
-      const { error: versionError } = await supabase.from('document_versions').insert({
-        document_id: document.id,
-        content: content,
-        version: newVersionNumber,
-        change_description: `Saved version ${newVersionNumber}`,
-      });
-
-      if (versionError) {
-        throw new Error(`Failed to create document version: ${versionError.message}`);
-      }
-
-      const { error: documentUpdateError } = await supabase
-        .from('documents')
-        .update({
-          content: content,
-          current_version: newVersionNumber,
-          status: status,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', document.id);
-
-      if (documentUpdateError) {
-        throw new Error(`Failed to update document: ${documentUpdateError.message}`);
-      }
-
-      showSuccess('Document saved successfully.');
-      setDocument((prev) =>
-        prev ? { ...prev, content: content, current_version: newVersionNumber, status: status } : null,
-      );
-      setViewingVersionContent(null);
-      setViewingVersionNumber(newVersionNumber);
-    } catch (error: any) {
-      showError(`Save failed: ${error.message}`);
-    } finally {
-      setIsSaving(false);
-    }
+  const handleSave = () => {
+    saveDocument(content);
   };
 
-  const handlePublish = async () => {
-    if (!document || isPublishing || isHistoricalView || isPublished) return;
-
-    setIsPublishing(true);
-    const { error } = await supabase
-      .from('documents')
-      .update({
-        status: 'published',
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', document.id);
-
-    if (error) {
-      showError(`Publish failed: ${error.message}`);
-      setIsPublishing(false);
-      return;
-    }
-
-    const syncResult = await syncDocumentMemory('publish');
-
-    const newStatus = 'published' as Document['status'];
-    setStatus(newStatus);
-    setDocument((prev) => (prev ? { ...prev, status: newStatus } : null));
-
-    if (syncResult.ok) {
-      showSuccess('Document published and project memory updated.');
-    } else {
-      showSuccess('Document published.');
-      showError(`Memory sync failed: ${syncResult.message}`);
-    }
-
-    setIsPublishing(false);
+  const handlePublish = () => {
+    updateDocumentStatus('published');
   };
 
-  const handleDisconnect = async () => {
-    if (!document || isDisconnecting || isHistoricalView || !isPublished) return;
-
-    setIsDisconnecting(true);
-    const { error } = await supabase
-      .from('documents')
-      .update({
-        status: 'draft',
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', document.id);
-
-    if (error) {
-      showError(`Disconnect failed: ${error.message}`);
-      setIsDisconnecting(false);
-      return;
-    }
-
-    const syncResult = await syncDocumentMemory('disconnect');
-
-    const newStatus = 'draft' as Document['status'];
-    setStatus(newStatus);
-    setDocument((prev) => (prev ? { ...prev, status: newStatus } : null));
-    setViewingVersionContent(null);
-    setViewingVersionNumber(document.current_version || null);
-
-    if (syncResult.ok) {
-      showSuccess('Document disconnected and removed from memory.');
-    } else {
-      showSuccess('Document disconnected.');
-      showError(`Memory cleanup failed: ${syncResult.message}`);
-    }
-
-    setIsDisconnecting(false);
-  };
-
-  const handleDeleteDocument = async () => {
-    if (!currentDocumentId || isDeleting) return;
-
-    setIsDeleting(true);
-    try {
-      const { error } = await supabase
-        .from('documents')
-        .delete()
-        .eq('id', currentDocumentId);
-
-      if (error) {
-        throw new Error(`Failed to delete document: ${error.message}`);
-      }
-
-      showSuccess('Document deleted successfully!');
-      setAiReviewFn(null);
-      setIsAiReviewLoadingFn(false);
-      navigate(`/dashboard/${currentProjectId}`);
-    } catch (error: any) {
-      showError(`Delete failed: ${error.message}`);
-    } finally {
-      setIsDeleting(false);
-    }
+  const handleDisconnect = () => {
+    updateDocumentStatus('draft');
   };
 
   const handleViewHistoricalVersion = (versionContent: string, versionNumber: number) => {
     setViewingVersionContent(versionContent);
     setViewingVersionNumber(versionNumber);
-    showSuccess(`Viewing historical version ${versionNumber}.`);
   };
 
   const handleBackToLatest = () => {
     setViewingVersionContent(null);
     setViewingVersionNumber(document?.current_version || null);
-    showSuccess('Switched back to the latest document version.');
   };
-
-  // File upload logic
-  const handleUploadFileButtonClick = () => {
-    if (fileInputRef.current) {
-      fileInputRef.current.click();
-    }
-  };
-
-  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    if (isPublished || isHistoricalView) {
-      showError('Cannot upload files when the document is published or viewing a historical version.');
-      return;
-    }
-
-    setIsUploadingFile(true);
-    const reader = new FileReader();
-    let contentHtml = '';
-    let rawTextContent = ''; // To store plain text for embedding
-
-    try {
-      const fileExtension = file.name.split('.').pop()?.toLowerCase();
-
-      if (fileExtension === 'docx') {
-        const arrayBuffer = await file.arrayBuffer();
-        const result = await mammoth.convertToHtml({ arrayBuffer });
-        contentHtml = result.value;
-        rawTextContent = mammoth.extractRawText({ arrayBuffer }).value;
-      } else if (fileExtension === 'html') {
-        contentHtml = await new Promise<string>((resolve) => {
-          reader.onload = (e) => resolve(e.target?.result as string);
-          reader.readAsText(file);
-        });
-        rawTextContent = new DOMParser().parseFromString(contentHtml, 'text/html').body.textContent || '';
-      } else if (fileExtension === 'md') {
-        const markdownText = await new Promise<string>((resolve) => {
-          reader.onload = (e) => resolve(e.target?.result as string);
-          reader.readAsText(file);
-        });
-        contentHtml = marked.parse(markdownText);
-        rawTextContent = markdownText; // Markdown text is good for embedding
-      } else {
-        showError('Unsupported file type. Please upload .docx, .html, or .md files.');
-        return;
-      }
-
-      // Sanitize HTML before inserting
-      const sanitizedHtml = DOMPurify.sanitize(contentHtml);
-
-      if (quillRef.current) {
-        const quill = quillRef.current.getEditor();
-        const range = quill.getSelection(true);
-        quill.clipboard.dangerouslyPasteHTML(range.index, sanitizedHtml);
-        quill.setSelection(range.index + sanitizedHtml.length, 0); // Move cursor after inserted content
-        setContent(quill.root.innerHTML); // Update local state with new content
-        showSuccess('File content inserted successfully!');
-
-        // Trigger step suggestion after content is loaded
-        if (currentProjectId && rawTextContent.trim()) {
-          await fetchStepSuggestions(currentProjectId, rawTextContent);
-        }
-      }
-    } catch (error: any) {
-      console.error('File upload error:', error);
-      showError(`Failed to process file: ${error.message}`);
-    } finally {
-      setIsUploadingFile(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = ''; // Clear the file input
-      }
-    }
-  };
-
-  const fetchStepSuggestions = async (projectId: string, documentContent: string) => {
-    if (!projectId || !documentContent) return;
-
-    setIsLoadingSuggestions(true);
-    try {
-      const { data, error } = await supabase.functions.invoke('suggest-step', {
-        body: { projectId, documentContent },
-        headers: {
-          Authorization: `Bearer ${supabase.auth.session()?.access_token}`,
-        },
-      });
-
-      if (error) {
-        showError(`Failed to get step suggestions: ${error.message}`);
-        setSuggestedSteps([]);
-      } else if (data && data.suggestions) {
-        setSuggestedSteps(data.suggestions);
-        setIsSuggestionDialogOpen(true);
-      }
-    } catch (error: any) {
-      console.error('Error invoking suggest-step:', error);
-      showError(`An unexpected error occurred during step suggestion: ${error.message}`);
-    } finally {
-      setIsLoadingSuggestions(false);
-    }
-  };
-
-  const handleSelectSuggestedStep = async (newStepId: string) => {
-    if (!document || isSaving) return;
-
-    setIsSaving(true);
-    try {
-      const { error } = await supabase
-        .from('documents')
-        .update({
-          step_id: newStepId,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', document.id);
-
-      if (error) {
-        throw new Error(`Failed to update document's step: ${error.message}`);
-      }
-
-      showSuccess('Document re-assigned to new step successfully!');
-      setDocument((prev) => (prev ? { ...prev, step_id: newStepId } : null));
-      setIsSuggestionDialogOpen(false);
-      // Optionally, navigate to the new step's workspace or refresh the current view
-      navigate(`/dashboard/${currentProjectId}/step/${newStepId}`);
-    } catch (error: any) {
-      showError(`Failed to re-assign document: ${error.message}`);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const modules = useMemo(
-    () => ({
-      toolbar: {
-        container: [
-          [{ header: [1, 2, false] }],
-          ['bold', 'italic', 'underline', 'strike', 'blockquote'],
-          [{ list: 'ordered' }, { list: 'bullet' }],
-          [{ indent: '-1' }, { indent: '+1' }],
-          ['link', 'image', 'uploadFile'],
-          ['clean'],
-        ],
-        handlers: {
-          uploadFile: handleUploadFileButtonClick,
-        },
-      },
-    }),
-    [handleUploadFileButtonClick],
-  );
-
-  const formats = useMemo(
-    () => [
-      'header',
-      'bold',
-      'italic',
-      'underline',
-      'strike',
-      'blockquote',
-      'list',
-      'bullet',
-      'indent',
-      'link',
-      'image',
-      'uploadFile',
-    ],
-    [],
-  );
 
   if (isLoadingDocument) {
     return (
@@ -527,11 +91,9 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
     );
   }
 
-  const disableSave = isSaving || isPublished || isHistoricalView || isUploadingFile;
-  const disablePublishDisconnect = isPublished
-    ? isDisconnecting || isHistoricalView || isUploadingFile
-    : isPublishing || isSaving || isHistoricalView || isUploadingFile;
-  const disableDelete = isDeleting || isHistoricalView || isUploadingFile;
+  const disableSave = isSaving || isPublished || isHistoricalView || isUploading;
+  const disablePublishDisconnect = isPublished ? isUpdatingStatus || isHistoricalView || isUploading : isUpdatingStatus || isSaving || isHistoricalView || isUploading;
+  const disableDelete = isHistoricalView || isUploading || isDeleting;
   const showPublishedBanner = isPublished && !isHistoricalView;
 
   return (
@@ -547,11 +109,11 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
           <div className="flex items-center gap-2">
             <Button
               id="tour-upload-document"
-              onClick={handleUploadFileButtonClick}
+              onClick={triggerFileUpload}
               variant="outline"
-              disabled={isPublished || isHistoricalView || isUploadingFile}
+              disabled={isPublished || isHistoricalView || isUploading}
             >
-              {isUploadingFile ? (
+              {isUploading ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : (
                 <FileUp className="mr-2 h-4 w-4" />
@@ -567,10 +129,10 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
               isPublished={isPublished}
               onPublish={handlePublish}
               onDisconnect={handleDisconnect}
-              isPublishing={isPublishing}
-              isDisconnecting={isDisconnecting}
+              isPublishing={isUpdatingStatus && document.status === 'draft'}
+              isDisconnecting={isUpdatingStatus && document.status === 'published'}
               disablePublishDisconnect={disablePublishDisconnect}
-              onDelete={handleDeleteDocument}
+              onDelete={deleteDocument}
               isDeleting={isDeleting}
               disableDelete={disableDelete}
             />
@@ -582,7 +144,7 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
               This document is published to RAG and locked for edits. Use “Disconnect” to make changes again.
             </div>
           )}
-          {isUploadingFile && (
+          {isUploading && (
             <div className="flex items-center justify-center p-4 text-muted-foreground">
               <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Processing file...
             </div>
@@ -592,9 +154,7 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
             theme="snow"
             value={isHistoricalView ? viewingVersionContent ?? '' : content}
             onChange={setContent}
-            modules={modules}
-            formats={formats}
-            readOnly={isHistoricalView || isPublished || isUploadingFile}
+            readOnly={isHistoricalView || isPublished || isUploading}
             placeholder="Start writing your document here..."
             className="flex-1 min-h-[300px] flex flex-col"
           />
@@ -608,22 +168,11 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
         </CardContent>
       </Card>
 
-      {currentDocumentId && document.current_version !== undefined && (
+      {documentId && document.current_version !== undefined && (
         <DocumentVersionList
-          documentId={currentDocumentId}
+          documentId={documentId}
           currentVersionNumber={document.current_version}
           onViewVersion={handleViewHistoricalVersion}
-        />
-      )}
-
-      {document && (
-        <StepSuggestionDialog
-          isOpen={isSuggestionDialogOpen}
-          onClose={() => setIsSuggestionDialogOpen(false)}
-          suggestions={suggestedSteps}
-          onSelectStep={handleSelectSuggestedStep}
-          currentStepId={document.step_id}
-          isLoading={isLoadingSuggestions}
         />
       )}
     </div>

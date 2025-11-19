@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Project } from '@/types/supabase';
@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Skeleton } from '@/components/ui/skeleton';
 import PhaseList from '@/components/phases/PhaseList';
 import { Button } from '@/components/ui/button';
-import { Trash2, Pencil } from 'lucide-react'; // Import Pencil icon
+import { Trash2, Pencil } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -19,62 +19,43 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
-import EditProjectDialog from '@/components/projects/EditProjectDialog'; // Import the new dialog
-import { formatDateTime } from '@/utils/dateUtils'; // New import
+import EditProjectDialog from '@/components/projects/EditProjectDialog';
+import { formatDateTime } from '@/utils/dateUtils';
+import { useSupabaseQuery } from '@/hooks/useSupabaseQuery';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 const ProjectDetails: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
-  const [project, setProject] = useState<Project | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false); // State for edit dialog
+  const queryClient = useQueryClient();
 
-  const fetchProject = useCallback(async () => {
-    if (!projectId) {
-      setIsLoading(false);
-      return;
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+
+  const { data: project, isLoading: isLoadingProject } = useSupabaseQuery(
+    ['project', projectId],
+    () => {
+      if (!projectId) return Promise.resolve({ data: null, error: null });
+      return supabase.from('projects').select('*').eq('id', projectId).single();
     }
+  );
 
-    setIsLoading(true);
-    const { data, error } = await supabase
-      .from('projects')
-      .select('*')
-      .eq('id', projectId)
-      .single();
-
-    if (error) {
-      showError(`Failed to load project details: ${error.message}`);
-      setProject(null);
-    } else {
-      setProject(data);
-    }
-    setIsLoading(false);
-  }, [projectId]);
-
-  useEffect(() => {
-    fetchProject();
-  }, [fetchProject]);
-
-  const handleDeleteProject = async () => {
-    if (!projectId) return;
-
-    setIsDeleting(true);
-    const { error } = await supabase
-      .from('projects')
-      .delete()
-      .eq('id', projectId);
-
-    if (error) {
-      showError(`Failed to delete project: ${error.message}`);
-    } else {
+  const { mutate: deleteProject, isPending: isDeleting } = useMutation({
+    mutationFn: async () => {
+      if (!projectId) return;
+      const { error } = await supabase.from('projects').delete().eq('id', projectId);
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: () => {
       showSuccess('Project deleted successfully!');
+      queryClient.invalidateQueries({ queryKey: ['projects'] }); // To refetch the project list
       navigate('/dashboard');
-    }
-    setIsDeleting(false);
-  };
+    },
+    onError: (error) => {
+      showError(`Failed to delete project: ${error.message}`);
+    },
+  });
 
-  if (isLoading) {
+  if (isLoadingProject) {
     return (
       <Card className="w-full">
         <CardHeader>
@@ -130,7 +111,7 @@ const ProjectDetails: React.FC = () => {
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                   <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction onClick={handleDeleteProject} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                  <AlertDialogAction onClick={() => deleteProject()} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
                     Delete
                   </AlertDialogAction>
                 </AlertDialogFooter>
@@ -152,7 +133,6 @@ const ProjectDetails: React.FC = () => {
         </CardContent>
       </Card>
 
-      {/* Project Roadmap (Phases and Steps) */}
       <Card className="w-full p-4">
         <h2 className="text-2xl font-bold mb-4">Project Roadmap</h2>
         <PhaseList projectId={project.id} />
@@ -163,7 +143,7 @@ const ProjectDetails: React.FC = () => {
           project={project}
           isOpen={isEditDialogOpen}
           onClose={() => setIsEditDialogOpen(false)}
-          onProjectUpdated={fetchProject} // Re-fetch project details after update
+          onProjectUpdated={() => queryClient.invalidateQueries({ queryKey: ['project', projectId] })}
         />
       )}
     </div>
