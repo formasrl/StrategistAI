@@ -7,8 +7,9 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { supabase } from '@/integrations/supabase/client';
 import { showError } from '@/utils/toast';
 import { cn } from '@/lib/utils';
+import { ChatMessage as DBChatMessage } from '@/types/supabase'; // Import DB ChatMessage type
 
-interface ChatMessage {
+interface ChatMessageDisplay {
   id: string;
   sender: 'user' | 'ai';
   text: string;
@@ -20,19 +21,63 @@ interface AiChatbotProps {
   phaseId?: string;
   stepId?: string;
   documentId?: string;
+  chatSessionId?: string;
+  setChatSessionId: (id: string | undefined) => void;
 }
 
-const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, documentId }) => {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+const AiChatbot: React.FC<AiChatbotProps> = ({
+  projectId,
+  phaseId,
+  stepId,
+  documentId,
+  chatSessionId,
+  setChatSessionId,
+}) => {
+  const [messages, setMessages] = useState<ChatMessageDisplay[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  useEffect(scrollToBottom, [messages]);
+  // Effect to fetch messages when chatSessionId changes
+  useEffect(() => {
+    const fetchMessages = async () => {
+      if (!chatSessionId) {
+        setMessages([]);
+        return;
+      }
+
+      setIsLoadingMessages(true);
+      const { data, error } = await supabase
+        .from('chat_messages')
+        .select('id, role, content, created_at')
+        .eq('chat_session_id', chatSessionId)
+        .order('created_at', { ascending: true });
+
+      if (error) {
+        showError(`Failed to load chat history: ${error.message}`);
+        setMessages([]);
+      } else {
+        setMessages(
+          (data || []).map((msg) => ({
+            id: msg.id,
+            sender: msg.role === 'assistant' ? 'ai' : 'user',
+            text: msg.content,
+            timestamp: msg.created_at,
+          }))
+        );
+      }
+      setIsLoadingMessages(false);
+    };
+
+    fetchMessages();
+  }, [chatSessionId]);
+
+  useEffect(scrollToBottom, [messages, isLoadingMessages]);
 
   const handleSendMessage = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -43,32 +88,26 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
       return;
     }
 
-    const userMessage: ChatMessage = {
+    const userMessageText = inputMessage.trim();
+    const userMessageDisplay: ChatMessageDisplay = {
       id: Date.now().toString(),
       sender: 'user',
-      text: inputMessage.trim(),
+      text: userMessageText,
       timestamp: new Date().toISOString(),
     };
 
-    const pendingMessages = [...messages, userMessage];
-    const recentMessagesPayload = pendingMessages.slice(-4).map((msg) => ({
-      sender: msg.sender,
-      text: msg.text,
-    }));
-
-    setMessages(pendingMessages);
+    setMessages((prev) => [...prev, userMessageDisplay]);
     setInputMessage('');
     setIsSending(true);
 
     try {
       const { data, error } = await supabase.functions.invoke('chat-ai-assistant', {
         body: {
-          message: userMessage.text,
+          message: userMessageText,
           projectId,
-          phaseId,
           stepId,
           documentId,
-          recentMessages: recentMessagesPayload,
+          chatSessionId, // Pass existing session ID or null
         },
       });
 
@@ -84,13 +123,39 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
           },
         ]);
       } else if (data?.response) {
-        const aiResponse: ChatMessage = {
-          id: (Date.now() + 1).toString(),
-          sender: 'ai',
-          text: data.response,
-          timestamp: new Date().toISOString(),
-        };
-        setMessages((prev) => [...prev, aiResponse]);
+        // If a new session was created, update the state
+        if (data.chatSessionId && data.chatSessionId !== chatSessionId) {
+          setChatSessionId(data.chatSessionId);
+        }
+        // Re-fetch messages to get the full history including the new AI response
+        const { data: updatedMessages, error: fetchError } = await supabase
+          .from('chat_messages')
+          .select('id, role, content, created_at')
+          .eq('chat_session_id', data.chatSessionId || chatSessionId)
+          .order('created_at', { ascending: true });
+
+        if (fetchError) {
+          showError(`Failed to refresh chat history: ${fetchError.message}`);
+          // Fallback to just adding the AI response if fetching fails
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: (Date.now() + 1).toString(),
+              sender: 'ai',
+              text: data.response,
+              timestamp: new Date().toISOString(),
+            },
+          ]);
+        } else {
+          setMessages(
+            (updatedMessages || []).map((msg) => ({
+              id: msg.id,
+              sender: msg.role === 'assistant' ? 'ai' : 'user',
+              text: msg.content,
+              timestamp: msg.created_at,
+            }))
+          );
+        }
       } else {
         setMessages((prev) => [
           ...prev,
@@ -137,39 +202,44 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
       <CardContent className="flex-1 p-4 overflow-hidden">
         <ScrollArea className="h-full pr-2">
           <div className="space-y-4">
-            {messages.length === 0 && (
+            {isLoadingMessages ? (
+              <div className="text-center text-muted-foreground italic py-4">
+                <Loader2 className="h-5 w-5 animate-spin inline-block mr-2" /> Loading chat history...
+              </div>
+            ) : messages.length === 0 ? (
               <div className="text-center text-muted-foreground italic py-4">
                 Start a conversation with your AI Brand Strategist!
               </div>
-            )}
-            {messages.map((msg) => (
-              <div
-                key={msg.id}
-                className={`flex items-start gap-3 ${
-                  msg.sender === 'user' ? 'justify-end' : 'justify-start'
-                }`}
-              >
-                {msg.sender === 'ai' && (
-                  <Bot className="h-6 w-6 text-blue-500 flex-shrink-0 mt-1" />
-                )}
+            ) : (
+              messages.map((msg) => (
                 <div
-                  className={cn(
-                    'max-w-[80%] p-3 rounded-lg',
-                    msg.sender === 'user'
-                      ? 'bg-primary text-primary-foreground rounded-br-none'
-                      : 'bg-muted text-muted-foreground rounded-bl-none',
-                  )}
+                  key={msg.id}
+                  className={`flex items-start gap-3 ${
+                    msg.sender === 'user' ? 'justify-end' : 'justify-start'
+                  }`}
                 >
-                  <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
-                  <span className="block text-xs opacity-70 mt-1">
-                    {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
+                  {msg.sender === 'ai' && (
+                    <Bot className="h-6 w-6 text-blue-500 flex-shrink-0 mt-1" />
+                  )}
+                  <div
+                    className={cn(
+                      'max-w-[80%] p-3 rounded-lg',
+                      msg.sender === 'user'
+                        ? 'bg-primary text-primary-foreground rounded-br-none'
+                        : 'bg-muted text-muted-foreground rounded-bl-none',
+                    )}
+                  >
+                    <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
+                    <span className="block text-xs opacity-70 mt-1">
+                      {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                  {msg.sender === 'user' && (
+                    <User className="h-6 w-6 text-gray-500 flex-shrink-0 mt-1" />
+                  )}
                 </div>
-                {msg.sender === 'user' && (
-                  <User className="h-6 w-6 text-gray-500 flex-shrink-0 mt-1" />
-                )}
-              </div>
-            ))}
+              ))
+            )}
             {isSending && (
               <div className="flex items-start gap-3 justify-start">
                 <Bot className="h-6 w-6 text-blue-500 flex-shrink-0 mt-1" />
@@ -189,10 +259,10 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
             placeholder="Ask your AI assistant..."
             value={inputMessage}
             onChange={(e) => setInputMessage(e.target.value)}
-            disabled={isSending}
+            disabled={isSending || isLoadingMessages}
             className="flex-1"
           />
-          <Button type="submit" size="icon" disabled={!inputMessage.trim() || isSending}>
+          <Button type="submit" size="icon" disabled={!inputMessage.trim() || isSending || isLoadingMessages}>
             {isSending ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (

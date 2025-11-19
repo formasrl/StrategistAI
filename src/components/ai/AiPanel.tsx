@@ -16,6 +16,8 @@ interface AiPanelProps {
   aiReview: AiReview | null;
   isAiReviewLoading: boolean;
   onGenerateReview: (docId: string) => void;
+  chatSessionId?: string; // New prop
+  setChatSessionId: (id: string | undefined) => void; // New prop
 }
 
 const AiPanel: React.FC<AiPanelProps> = ({
@@ -26,6 +28,8 @@ const AiPanel: React.FC<AiPanelProps> = ({
   aiReview,
   isAiReviewLoading,
   onGenerateReview,
+  chatSessionId,
+  setChatSessionId,
 }) => {
   return (
     <Tabs defaultValue="chat" className="flex h-full min-h-0 flex-col">
@@ -41,7 +45,14 @@ const AiPanel: React.FC<AiPanelProps> = ({
         value="chat"
         className="mt-0 flex h-full min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden"
       >
-        <AiChatbot projectId={projectId} phaseId={phaseId} stepId={stepId} documentId={documentId} />
+        <AiChatbot
+          projectId={projectId}
+          phaseId={phaseId}
+          stepId={stepId}
+          documentId={documentId}
+          chatSessionId={chatSessionId}
+          setChatSessionId={setChatSessionId}
+        />
       </TabsContent>
       <TabsContent
         value="review"

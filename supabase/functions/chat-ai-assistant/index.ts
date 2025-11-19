@@ -71,6 +71,12 @@ interface MemoryMatch {
   distance: number;
 }
 
+interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  created_at: string;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -88,13 +94,13 @@ serve(async (req) => {
       projectId,
       stepId,
       documentId,
-      recentMessages,
+      chatSessionId: incomingChatSessionId,
     }: {
       message?: string;
       projectId?: string;
       stepId?: string;
       documentId?: string;
-      recentMessages?: { sender: string; text: string }[];
+      chatSessionId?: string;
     } = body ?? {};
 
     if (!message || !projectId || !stepId) {
@@ -106,6 +112,30 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
       { global: { headers: { Authorization: authHeader } } }
     );
+
+    let currentChatSessionId = incomingChatSessionId;
+
+    // 1. Get or Create Chat Session
+    if (!currentChatSessionId) {
+      const { data: newSession, error: sessionError } = await supabaseClient
+        .from('chat_sessions')
+        .insert({ project_id: projectId, step_id: stepId, document_id: documentId || null })
+        .select('id')
+        .single();
+
+      if (sessionError) {
+        console.error("Failed to create chat session:", sessionError);
+        return respond({ error: "Failed to start chat session." }, 500);
+      }
+      currentChatSessionId = newSession.id;
+    }
+
+    // 2. Store User Message
+    await supabaseClient.from('chat_messages').insert({
+      chat_session_id: currentChatSessionId,
+      role: 'user',
+      content: message,
+    });
 
     // Layer 1: Fetch Project Profile
     const { data: projectData, error: projectError } = await supabaseClient
@@ -177,7 +207,19 @@ serve(async (req) => {
     }
     let currentMemoriesText = formatMemories(memoryMatches);
 
-    let currentConversationSnippet = formatRecentConversation(recentMessages ?? []);
+    // Fetch recent messages from the database for context
+    const { data: recentMessagesData, error: recentMessagesError } = await supabaseClient
+      .from('chat_messages')
+      .select('role, content, created_at')
+      .eq('chat_session_id', currentChatSessionId)
+      .order('created_at', { ascending: true })
+      .limit(6); // Fetch last 6 messages (3 user, 3 assistant)
+
+    if (recentMessagesError) {
+      console.error("Failed to fetch recent chat messages:", recentMessagesError);
+      // Continue without recent conversation if there's an error
+    }
+    let currentConversationSnippet = formatRecentConversation(recentMessagesData || []);
 
     const systemPrompt = [
       "You are StrategistAI, a senior brand strategist and coach.",
@@ -293,8 +335,16 @@ serve(async (req) => {
       return respond({ error: "AI response was empty." }, 500);
     }
 
+    // Store AI Response
+    await supabaseClient.from('chat_messages').insert({
+      chat_session_id: currentChatSessionId,
+      role: 'assistant',
+      content: reply,
+    });
+
     return respond({
       response: reply,
+      chatSessionId: currentChatSessionId, // Return the session ID
       memories: memoryMatches.map((memory) => ({
         documentName: memory.document_name,
         stepName: memory.step_name,
@@ -413,14 +463,14 @@ function buildDraftSegment(content: string, summary?: string): string | null {
   return `CURRENT DRAFT EXCERPT:\n${trimmed.slice(0, 800)}...`;
 }
 
-function formatRecentConversation(messages: { sender: string; text: string }[]): string | null {
+function formatRecentConversation(messages: ChatMessage[]): string | null {
   if (!messages.length) return null;
 
-  const recent = messages.slice(-4);
+  const recent = messages.slice(-6); // Get last 6 messages for context
   return recent
     .map((entry) => {
-      const speaker = entry.sender === "ai" ? "Assistant" : "User";
-      return `${speaker}: ${entry.text}`;
+      const speaker = entry.role === "assistant" ? "Assistant" : "User";
+      return `${speaker}: ${entry.content}`;
     })
     .join("\n");
 }
