@@ -81,12 +81,19 @@ interface SemanticMatch {
   summary: string;
   title: string;
   tags: string[] | null;
+  distance: number; // Added distance
 }
 
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   created_at: string;
+}
+
+interface SourceAttribution {
+  document_name: string;
+  chunk_preview: string;
+  relevance_score: number;
 }
 
 serve(async (req) => {
@@ -212,6 +219,7 @@ serve(async (req) => {
     });
 
     let formattedSemanticMemories = formatSemanticSearchResults(semanticMatchesData || []);
+    const sourcesForResponse = formatSourcesForResponse(semanticMatchesData || []);
 
     // Layer 4: Current Step Info
     const { data: stepData, error: stepError } = await supabaseClient
@@ -353,7 +361,8 @@ serve(async (req) => {
     });
 
     return respond({
-      response: reply,
+      answer: reply, // Changed from 'response' to 'answer'
+      sources: sourcesForResponse, // Include sources
       chatSessionId: currentChatSessionId, // Return the session ID
       metadata: { history_pruned: historyPruned }, // New: Add metadata object
     });
@@ -476,6 +485,23 @@ function formatSemanticSearchResults(matches: SemanticMatch[]): string {
       ].filter(Boolean).join("\n");
     })
     .join("\n\n");
+}
+
+function formatSourcesForResponse(matches: SemanticMatch[]): SourceAttribution[] {
+  return matches.map((match) => ({
+    document_name: match.document_name,
+    chunk_preview: match.summary, // Using summary as chunk_preview
+    relevance_score: convertDistanceToRelevanceScore(match.distance),
+  }));
+}
+
+function convertDistanceToRelevanceScore(distance: number): number {
+  // Cosine distance ranges from 0 (identical) to 2 (opposite).
+  // We want a score from 0 to 100, where 100 is most relevant (distance 0)
+  // and 0 is least relevant (distance 2).
+  // Formula: (1 - (distance / 2)) * 100
+  const score = (1 - (distance / 2)) * 100;
+  return Math.max(0, Math.round(score)); // Ensure score is not negative and is an integer
 }
 
 function formatStepDefinition(step: StepRecord): string {
