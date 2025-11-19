@@ -77,9 +77,10 @@ const Dashboard = () => {
           }
         }
       } else if (stepId) {
+        // Fixed query: select projects VIA phases because steps doesn't have project_id
         const { data: stepData, error: stepError } = await supabase
           .from('steps')
-          .select('*, phases(*), projects(*)')
+          .select('*, phases(*, projects(*))')
           .eq('id', stepId)
           .single();
 
@@ -87,11 +88,14 @@ const Dashboard = () => {
           console.error('Error fetching active step context:', stepError);
         } else if (stepData) {
           setActiveStep(stepData);
-          if (stepData.phases) {
-            setActivePhase(stepData.phases);
-          }
-          if (stepData.projects) {
-            setActiveProject(stepData.projects);
+          
+          // Handle the nested relationship data
+          const phase = stepData.phases as any;
+          if (phase) {
+            setActivePhase(phase as Phase);
+            if (phase.projects) {
+              setActiveProject(phase.projects as Project);
+            }
           }
         }
       } else if (projectId) {
