@@ -25,6 +25,7 @@ function countTokens(text: string | null | undefined): number {
 const TRUNCATION_CHAR_LIMIT = 3000;
 const GPT_3_5_MAX_TOKENS = 6000;
 const GPT_4_MAX_TOKENS = 30000;
+const MAX_HISTORY_CHARS = 4000; // New: Maximum characters for conversation history
 
 function getModelTokenLimit(modelName: string): number {
   if (modelName.includes("gpt-4")) {
@@ -213,13 +214,14 @@ serve(async (req) => {
       .select('role, content, created_at')
       .eq('chat_session_id', currentChatSessionId)
       .order('created_at', { ascending: true })
-      .limit(6); // Fetch last 6 messages (3 user, 3 assistant)
+      .limit(50); // Fetch more messages to allow for pruning
 
     if (recentMessagesError) {
       console.error("Failed to fetch recent chat messages:", recentMessagesError);
       // Continue without recent conversation if there's an error
     }
-    let currentConversationSnippet = formatRecentConversation(recentMessagesData || []);
+    
+    const { snippet: currentConversationSnippet, pruned: historyPruned } = formatRecentConversation(recentMessagesData || [], MAX_HISTORY_CHARS);
 
     const systemPrompt = [
       "You are StrategistAI, a senior brand strategist and coach.",
@@ -264,7 +266,7 @@ serve(async (req) => {
         console.log(`[chat-ai-assistant] Document content truncated to ${TRUNCATION_CHAR_LIMIT} chars. New token count: ${totalPromptTokens}`);
       }
 
-      // 2. If still over, truncate conversationSnippet
+      // 2. If still over, truncate conversationSnippet (this is a secondary truncation if the initial MAX_HISTORY_CHARS wasn't enough for the overall prompt)
       if (totalPromptTokens > modelTokenLimit && currentConversationSnippet) {
         const tokensToReduce = totalPromptTokens - modelTokenLimit;
         const charsToKeep = Math.max(0, countTokens(currentConversationSnippet) - tokensToReduce) * 4;
@@ -351,6 +353,7 @@ serve(async (req) => {
         summary: memory.summary,
         keyDecisions: memory.key_decisions ?? [],
       })),
+      metadata: { history_pruned: historyPruned }, // New: Add metadata object
     });
   } catch (error) {
     console.error("chat-ai-assistant error", error);
@@ -463,16 +466,31 @@ function buildDraftSegment(content: string, summary?: string): string | null {
   return `CURRENT DRAFT EXCERPT:\n${trimmed.slice(0, 800)}...`;
 }
 
-function formatRecentConversation(messages: ChatMessage[]): string | null {
-  if (!messages.length) return null;
+function formatRecentConversation(messages: ChatMessage[], maxChars: number): { snippet: string | null; pruned: boolean } {
+  if (!messages.length) return { snippet: null, pruned: false };
 
-  const recent = messages.slice(-6); // Get last 6 messages for context
-  return recent
-    .map((entry) => {
-      const speaker = entry.role === "assistant" ? "Assistant" : "User";
-      return `${speaker}: ${entry.content}`;
-    })
-    .join("\n");
+  const formattedLines: string[] = [];
+  let currentLength = 0;
+  let historyPruned = false;
+
+  // Iterate from newest to oldest
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const entry = messages[i];
+    const speaker = entry.role === "assistant" ? "Assistant" : "User";
+    const line = `${speaker}: ${entry.content}`;
+
+    // Check if adding this line exceeds the limit, accounting for newline character
+    if (currentLength + line.length + (formattedLines.length > 0 ? "\n".length : 0) > maxChars) {
+      historyPruned = true;
+      break; // Stop adding messages
+    }
+
+    // Add to the beginning of the array to maintain chronological order
+    formattedLines.unshift(line);
+    currentLength += line.length + (formattedLines.length > 1 ? "\n".length : 0);
+  }
+
+  return { snippet: formattedLines.join("\n"), pruned: historyPruned };
 }
 
 function convertDistanceToScore(distance: number): string {
