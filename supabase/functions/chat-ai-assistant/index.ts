@@ -22,7 +22,9 @@ function countTokens(text: string | null | undefined): number {
 }
 
 // Limits
-const TRUNCATION_CHAR_LIMIT = 3000;
+const TRUNCATION_CHAR_LIMIT = 3000; // Max characters for document content
+const MAX_HISTORY_CHARS = 4000; // Maximum characters for conversation history
+const MAX_SEMANTIC_MEMORIES_CHARS = 2000; // Maximum characters for semantic memories
 const GPT_3_5_MAX_TOKENS = 6000;
 const GPT_4_MAX_TOKENS = 30000;
 
@@ -63,12 +65,28 @@ interface StepRecord {
   } | null;
 }
 
-interface MemoryMatch {
-  step_name: string;
+interface DocumentRecord {
+  id: string;
+  project_id: string;
+  step_id: string;
+  document_name: string;
+  content: string | null;
+  summary: string | null;
+  key_decisions: string[] | null;
+}
+
+interface SemanticMatch {
+  document_id: string;
   document_name: string;
   summary: string;
-  key_decisions: string[] | null;
-  distance: number;
+  title: string;
+  tags: string[] | null;
+}
+
+interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
 }
 
 serve(async (req) => {
@@ -88,13 +106,13 @@ serve(async (req) => {
       projectId,
       stepId,
       documentId,
-      recentMessages,
+      chatSessionId: incomingChatSessionId,
     }: {
       message?: string;
       projectId?: string;
       stepId?: string;
       documentId?: string;
-      recentMessages?: { sender: string; text: string }[];
+      chatSessionId?: string;
     } = body ?? {};
 
     if (!message || !projectId || !stepId) {
@@ -107,7 +125,29 @@ serve(async (req) => {
       { global: { headers: { Authorization: authHeader } } }
     );
 
-    // Layer 1: Fetch Project Profile
+    let currentChatSessionId = incomingChatSessionId;
+
+    if (!currentChatSessionId) {
+      const { data: newSession, error: sessionError } = await supabaseClient
+        .from("chat_sessions")
+        .insert({ project_id: projectId, step_id: stepId, document_id: documentId || null })
+        .select("id")
+        .single();
+
+      if (sessionError) {
+        console.error("Failed to create chat session:", sessionError);
+        return respond({ error: "Failed to start chat session." }, 500);
+      }
+      currentChatSessionId = newSession.id;
+    }
+
+    await supabaseClient.from("chat_messages").insert({
+      chat_session_id: currentChatSessionId,
+      role: "user",
+      content: message,
+    });
+
+    // Layer 1: Project Profile
     const { data: projectData, error: projectError } = await supabaseClient
       .from("projects")
       .select("id, user_id, name, one_liner, audience, positioning, constraints, project_profile")
@@ -125,10 +165,80 @@ serve(async (req) => {
     }
     let currentProjectProfileText = fetchProjectProfileText(project);
 
-    // Layer 2: Current Step Info
+    // Layer 2: Current Document Context
+    let currentDocumentContextText: string | null = null;
+    let currentDocumentContentExcerpt: string | null = null;
+    let documentSummaryForSemanticSearch: string | undefined;
+
+    if (documentId) {
+      const { data: documentDetails, error: docError } = await supabaseClient
+        .from("documents")
+        .select("id, document_name, content, summary, key_decisions, project_id, step_id")
+        .eq("id", documentId)
+        .maybeSingle<DocumentRecord>();
+
+      if (docError || !documentDetails) {
+        return respond({ error: "Document not found or accessible." }, 404);
+      }
+      if (documentDetails.project_id !== projectId || documentDetails.step_id !== stepId) {
+        return respond({ error: "Document does not belong to the provided project or step." }, 403);
+      }
+
+      currentDocumentContextText = buildDocumentContextString(
+        documentDetails.document_name,
+        documentDetails.summary,
+        documentDetails.key_decisions
+      );
+      currentDocumentContentExcerpt = buildDraftSegment(
+        stripHtmlTags(documentDetails.content ?? ""),
+        documentDetails.summary
+      );
+      documentSummaryForSemanticSearch =
+        typeof documentDetails.summary === "string" ? documentDetails.summary : undefined;
+    }
+
+    // Layer 3: Semantic Retrieval (search_document_embeddings)
+    const queryTextForSemanticSearch =
+      documentSummaryForSemanticSearch && documentSummaryForSemanticSearch.trim() !== ""
+        ? documentSummaryForSemanticSearch
+        : message;
+
+    const queryEmbedding = await createEmbedding(openAIKeyResult.key, queryTextForSemanticSearch);
+
+    const { data: semanticMatchesData, error: rpcError } = await supabaseClient.rpc(
+      "search_document_embeddings",
+      {
+        input_project_id: projectId,
+        query_embedding: queryEmbedding,
+        top_k: 3,
+      }
+    );
+
+    if (rpcError) {
+      console.error("search_document_embeddings error", rpcError);
+    }
+
+    const semanticMatches = (semanticMatchesData || []) as SemanticMatch[];
+    let formattedSemanticMemories = formatSemanticSearchResults(semanticMatches);
+
+    // Build sources array for response
+    const sources = semanticMatches.map((match) => {
+      const chunk = match.summary || "";
+      const chunk_preview = chunk.length > 220 ? `${chunk.slice(0, 217)}...` : chunk;
+      const relevance_score = 1; // RPC doesn't return a distance; treat returned matches as high relevance
+      return {
+        document_name: match.document_name,
+        chunk_preview,
+        relevance_score,
+      };
+    });
+
+    // Layer 4: Current Step Info
     const { data: stepData, error: stepError } = await supabaseClient
       .from("steps")
-      .select("id, step_name, description, why_matters, timeline, phases(phase_name, phase_number, project_id)")
+      .select(
+        "id, step_name, description, why_matters, timeline, phases(phase_name, phase_number, project_id)"
+      )
       .eq("id", stepId)
       .maybeSingle();
 
@@ -141,43 +251,22 @@ serve(async (req) => {
     const step = stepData as StepRecord;
     let currentStepDefinition = formatStepDefinition(step);
 
-    let currentDocumentContent = "";
-    let currentDocumentSummary: string | undefined;
-    if (documentId) {
-      const { data: documentData, error: docError } = await supabaseClient
-        .from("documents")
-        .select("content, summary, project_id, step_id")
-        .eq("id", documentId)
-        .maybeSingle();
+    // Layer 5: Recent Conversation History
+    const { data: recentMessagesData, error: recentMessagesError } = await supabaseClient
+      .from("chat_messages")
+      .select("role, content, created_at")
+      .eq("chat_session_id", currentChatSessionId)
+      .order("created_at", { ascending: true })
+      .limit(50);
 
-      if (docError || !documentData) {
-        return respond({ error: "Document not found or accessible." }, 404);
-      }
-      if (documentData.project_id !== projectId || documentData.step_id !== stepId) {
-        return respond({ error: "Document does not belong to the provided project or step." }, 403);
-      }
-      currentDocumentContent = stripHtmlTags(documentData.content ?? "");
-      currentDocumentSummary = typeof documentData.summary === "string" ? documentData.summary : undefined;
+    if (recentMessagesError) {
+      console.error("Failed to fetch recent chat messages:", recentMessagesError);
     }
-    let currentDraftedContext = buildDraftSegment(currentDocumentContent, currentDocumentSummary);
 
-    // Layer 3: Retrieved Decisions Summary + Key Points
-    const { data: relevantDecisionsData, error: relevantDecisionsError } = await supabaseClient.functions.invoke('retrieve-relevant-decisions', {
-      body: { projectId, queryText: message },
-      headers: {
-        Authorization: authHeader,
-      },
-    });
-
-    let memoryMatches: MemoryMatch[] = [];
-    if (relevantDecisionsError) {
-      console.error("Error invoking retrieve-relevant-decisions:", relevantDecisionsError);
-    } else if (relevantDecisionsData?.results) {
-      memoryMatches = relevantDecisionsData.results as MemoryMatch[];
-    }
-    let currentMemoriesText = formatMemories(memoryMatches);
-
-    let currentConversationSnippet = formatRecentConversation(recentMessages ?? []);
+    const { snippet: currentConversationSnippet, pruned: historyPruned } = formatRecentConversation(
+      (recentMessagesData || []) as ChatMessage[],
+      MAX_HISTORY_CHARS
+    );
 
     const systemPrompt = [
       "You are StrategistAI, a senior brand strategist and coach.",
@@ -188,86 +277,118 @@ serve(async (req) => {
     ].join(" ");
 
     const modelTokenLimit = getModelTokenLimit(CHAT_MODEL);
-    const systemPromptTokens = countTokens(systemPrompt);
-    const userMessageTokens = countTokens(message);
 
-    // Calculate initial tokens with full content
-    let totalPromptTokens =
-      systemPromptTokens +
-      countTokens(currentProjectProfileText) +
-      countTokens(currentStepDefinition) +
-      countTokens(currentMemoriesText) +
-      countTokens(currentConversationSnippet) +
-      countTokens(currentDraftedContext ?? "") +
-      userMessageTokens;
+    // Assemble layers in order
+    const promptParts: string[] = [];
+    promptParts.push(`PROJECT PROFILE:\n${currentProjectProfileText}`);
+    if (currentDocumentContextText) {
+      promptParts.push(`CURRENT DOCUMENT CONTEXT:\n${currentDocumentContextText}`);
+    }
+    promptParts.push(`RELEVANT SEMANTIC MEMORIES:\n${formattedSemanticMemories}`);
+    promptParts.push(`CURRENT STEP:\n${currentStepDefinition}`);
+    if (currentConversationSnippet) {
+      promptParts.push(`RECENT CONVERSATION:\n${currentConversationSnippet}`);
+    }
+    if (currentDocumentContentExcerpt) {
+      promptParts.push(`CURRENT DRAFT EXCERPT:\n${currentDocumentContentExcerpt}`);
+    }
+    promptParts.push(`USER QUESTION:\n${message}`);
 
-    console.log(`[chat-ai-assistant] Initial prompt token count: ${totalPromptTokens} for model: ${CHAT_MODEL}`);
+    let finalPrompt = promptParts.join("\n\n");
+    let totalPromptTokens = countTokens(systemPrompt + finalPrompt);
 
-    // Truncation logic
+    console.log(
+      `[chat-ai-assistant] Initial prompt token count: ${totalPromptTokens} for model: ${CHAT_MODEL}`
+    );
+
+    // Truncation: keep user question, then document, then conversation, then semantic memories
     if (totalPromptTokens > modelTokenLimit) {
-      console.log(`[chat-ai-assistant] Prompt exceeds ${modelTokenLimit} tokens. Attempting truncation.`);
+      console.log(
+        `[chat-ai-assistant] Prompt exceeds ${modelTokenLimit} tokens. Attempting truncation.`
+      );
 
-      // 1. Truncate document content to TRUNCATION_CHAR_LIMIT (3000 chars)
-      if (currentDocumentContent && currentDocumentContent.length > TRUNCATION_CHAR_LIMIT) {
-        currentDocumentContent = truncateToChars(currentDocumentContent, TRUNCATION_CHAR_LIMIT);
-        currentDraftedContext = buildDraftSegment(currentDocumentContent, currentDocumentSummary);
-        totalPromptTokens =
-          systemPromptTokens +
-          countTokens(currentProjectProfileText) +
-          countTokens(currentStepDefinition) +
-          countTokens(currentMemoriesText) +
-          countTokens(currentConversationSnippet) +
-          countTokens(currentDraftedContext ?? "") +
-          userMessageTokens;
-        console.log(`[chat-ai-assistant] Document content truncated to ${TRUNCATION_CHAR_LIMIT} chars. New token count: ${totalPromptTokens}`);
+      if (
+        currentDocumentContentExcerpt &&
+        countTokens(currentDocumentContentExcerpt) > TRUNCATION_CHAR_LIMIT / 4
+      ) {
+        currentDocumentContentExcerpt = truncateToChars(
+          currentDocumentContentExcerpt,
+          TRUNCATION_CHAR_LIMIT
+        );
+        finalPrompt = rebuildPrompt(
+          currentProjectProfileText,
+          currentDocumentContextText,
+          formattedSemanticMemories,
+          currentStepDefinition,
+          currentConversationSnippet,
+          currentDocumentContentExcerpt,
+          message
+        );
+        totalPromptTokens = countTokens(systemPrompt + finalPrompt);
+        console.log(
+          `[chat-ai-assistant] Document content truncated. New token count: ${totalPromptTokens}`
+        );
       }
 
-      // 2. If still over, truncate conversationSnippet
-      if (totalPromptTokens > modelTokenLimit && currentConversationSnippet) {
-        const tokensToReduce = totalPromptTokens - modelTokenLimit;
-        const charsToKeep = Math.max(0, countTokens(currentConversationSnippet) - tokensToReduce) * 4;
-        currentConversationSnippet = truncateToChars(currentConversationSnippet, charsToKeep);
-        totalPromptTokens =
-          systemPromptTokens +
-          countTokens(currentProjectProfileText) +
-          countTokens(currentStepDefinition) +
-          countTokens(currentMemoriesText) +
-          countTokens(currentConversationSnippet) +
-          countTokens(currentDraftedContext ?? "") +
-          userMessageTokens;
-        console.log(`[chat-ai-assistant] Conversation snippet truncated. New token count: ${totalPromptTokens}`);
+      if (
+        totalPromptTokens > modelTokenLimit &&
+        currentConversationSnippet &&
+        countTokens(currentConversationSnippet) > MAX_HISTORY_CHARS / 4
+      ) {
+        currentConversationSnippet = truncateToChars(currentConversationSnippet, MAX_HISTORY_CHARS);
+        finalPrompt = rebuildPrompt(
+          currentProjectProfileText,
+          currentDocumentContextText,
+          formattedSemanticMemories,
+          currentStepDefinition,
+          currentConversationSnippet,
+          currentDocumentContentExcerpt,
+          message
+        );
+        totalPromptTokens = countTokens(systemPrompt + finalPrompt);
+        console.log(
+          `[chat-ai-assistant] Conversation snippet truncated. New token count: ${totalPromptTokens}`
+        );
       }
 
-      // 3. If still over, throw error
+      if (
+        totalPromptTokens > modelTokenLimit &&
+        formattedSemanticMemories &&
+        countTokens(formattedSemanticMemories) > MAX_SEMANTIC_MEMORIES_CHARS / 4
+      ) {
+        formattedSemanticMemories = truncateToChars(
+          formattedSemanticMemories,
+          MAX_SEMANTIC_MEMORIES_CHARS
+        );
+        finalPrompt = rebuildPrompt(
+          currentProjectProfileText,
+          currentDocumentContextText,
+          formattedSemanticMemories,
+          currentStepDefinition,
+          currentConversationSnippet,
+          currentDocumentContentExcerpt,
+          message
+        );
+        totalPromptTokens = countTokens(systemPrompt + finalPrompt);
+        console.log(
+          `[chat-ai-assistant] Semantic memories truncated. New token count: ${totalPromptTokens}`
+        );
+      }
+
       if (totalPromptTokens > modelTokenLimit) {
         return respond(
           {
-            error: `Your request is too long (${totalPromptTokens} tokens). Even after truncating document content and conversation history, it exceeds the model's ${modelTokenLimit} token limit. Please shorten your query or document content.`,
+            error: `Your request is too long (${totalPromptTokens} tokens). Even after truncating context, it exceeds the model's ${modelTokenLimit} token limit. Please shorten your query or document content.`,
           },
-          400,
+          400
         );
       }
     }
 
-    const userPromptSections = [];
-    userPromptSections.push(`PROJECT PROFILE:\n${currentProjectProfileText}`);
-    userPromptSections.push(`CURRENT STEP:\n${currentStepDefinition}`);
-    userPromptSections.push(`RELEVANT PAST DECISIONS:\n${currentMemoriesText}`);
-    if (currentConversationSnippet) {
-      userPromptSections.push(`RECENT CONVERSATION:\n${currentConversationSnippet}`);
-    }
-    if (currentDraftedContext) {
-      userPromptSections.push(currentDraftedContext);
-    }
-    userPromptSections.push(`USER QUESTION:\n${message}`);
-
-    const finalPrompt = userPromptSections.join("\n\n");
-    console.log(`[chat-ai-assistant] Final prompt token count after all truncations: ${countTokens(finalPrompt)}`);
-
     const chatResponse = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${openAIKeyResult.key}`,
+        Authorization: `Bearer ${openAIKeyResult.key}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -293,20 +414,50 @@ serve(async (req) => {
       return respond({ error: "AI response was empty." }, 500);
     }
 
+    await supabaseClient.from("chat_messages").insert({
+      chat_session_id: currentChatSessionId,
+      role: "assistant",
+      content: reply,
+    });
+
     return respond({
-      response: reply,
-      memories: memoryMatches.map((memory) => ({
-        documentName: memory.document_name,
-        stepName: memory.step_name,
-        summary: memory.summary,
-        keyDecisions: memory.key_decisions ?? [],
-      })),
+      answer: reply,
+      response: reply, // Backward-compatible
+      sources,
+      chatSessionId: currentChatSessionId,
+      metadata: { history_pruned: historyPruned },
     });
   } catch (error) {
     console.error("chat-ai-assistant error", error);
     return respond({ error: "Unexpected error while generating AI response." }, 500);
   }
 });
+
+function rebuildPrompt(
+  projectProfile: string,
+  documentContext: string | null,
+  semanticMemories: string,
+  stepDefinition: string,
+  conversationSnippet: string | null,
+  documentExcerpt: string | null,
+  userQuestion: string
+): string {
+  const parts: string[] = [];
+  parts.push(`PROJECT PROFILE:\n${projectProfile}`);
+  if (documentContext) {
+    parts.push(`CURRENT DOCUMENT CONTEXT:\n${documentContext}`);
+  }
+  parts.push(`RELEVANT SEMANTIC MEMORIES:\n${semanticMemories}`);
+  parts.push(`CURRENT STEP:\n${stepDefinition}`);
+  if (conversationSnippet) {
+    parts.push(`RECENT CONVERSATION:\n${conversationSnippet}`);
+  }
+  if (documentExcerpt) {
+    parts.push(`CURRENT DRAFT EXCERPT:\n${documentExcerpt}`);
+  }
+  parts.push(`USER QUESTION:\n${userQuestion}`);
+  return parts.join("\n\n");
+}
 
 function respond(payload: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(payload), {
@@ -344,6 +495,35 @@ async function resolveOpenAIApiKey(
   return { ok: true, key };
 }
 
+async function createEmbedding(apiKey: string, text: string): Promise<number[]> {
+  const response = await fetch("https://api.openai.com/v1/embeddings", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: EMBEDDING_MODEL,
+      input: text,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("OpenAI embedding error", errorText);
+    throw new Error("Failed to generate embedding.");
+  }
+
+  const embeddingPayload = await response.json();
+  const vector = embeddingPayload?.data?.[0]?.embedding;
+
+  if (!Array.isArray(vector)) {
+    throw new Error("Embedding response missing vector data.");
+  }
+
+  return vector.map((value: number) => Number(value));
+}
+
 function fetchProjectProfileText(project: ProjectRecord): string {
   if (project.project_profile && project.project_profile.trim()) {
     return project.project_profile;
@@ -361,26 +541,39 @@ function fetchProjectProfileText(project: ProjectRecord): string {
   ].join("\n");
 }
 
-function formatMemories(memories: MemoryMatch[]): string {
-  if (!memories.length) {
-    return "No relevant published decisions found.";
+function buildDocumentContextString(
+  documentName: string,
+  summary: string | null,
+  keyDecisions: string[] | null
+): string {
+  const parts = [`Document Name: ${documentName}`];
+  if (summary && summary.trim()) {
+    parts.push(`Summary: ${summary.trim()}`);
+  }
+  if (keyDecisions && keyDecisions.length > 0) {
+    parts.push("Key Decisions:");
+    keyDecisions.forEach((decision) => parts.push(`- ${decision}`));
+  }
+  return parts.join("\n");
+}
+
+function formatSemanticSearchResults(matches: SemanticMatch[]): string {
+  if (!matches.length) {
+    return "No relevant published documents found.";
   }
 
-  return memories
-    .map((memory, index) => {
-      const keyDecisions = (memory.key_decisions ?? []).slice(0, 2);
-      const decisionsText = keyDecisions.length
-        ? keyDecisions.map((decision) => `  • ${decision}`).join("\n")
-        : "  • Key decisions not recorded.";
-      const summary = memory.summary.length > 220 ? `${memory.summary.slice(0, 217)}...` : memory.summary;
-      const score = convertDistanceToScore(memory.distance);
+  return matches
+    .map((match, index) => {
+      const summary = match.summary.length > 220 ? `${match.summary.slice(0, 217)}...` : match.summary;
       return [
-        `${index + 1}. ${memory.document_name} (Step: ${memory.step_name}) (relevance ${score})`,
+        `${index + 1}. Document: ${match.document_name}`,
         `  Summary: ${summary}`,
-        decisionsText,
-      ].join("\n");
+        match.tags && match.tags.length > 0 ? `  Tags: ${match.tags.join(", ")}` : undefined,
+      ]
+        .filter(Boolean)
+        .join("\n");
     })
-    .join("\n");
+    .join("\n\n");
 }
 
 function formatStepDefinition(step: StepRecord): string {
@@ -413,24 +606,31 @@ function buildDraftSegment(content: string, summary?: string): string | null {
   return `CURRENT DRAFT EXCERPT:\n${trimmed.slice(0, 800)}...`;
 }
 
-function formatRecentConversation(messages: { sender: string; text: string }[]): string | null {
-  if (!messages.length) return null;
+function formatRecentConversation(
+  messages: ChatMessage[],
+  maxChars: number
+): { snippet: string | null; pruned: boolean } {
+  if (!messages.length) return { snippet: null, pruned: false };
 
-  const recent = messages.slice(-4);
-  return recent
-    .map((entry) => {
-      const speaker = entry.sender === "ai" ? "Assistant" : "User";
-      return `${speaker}: ${entry.text}`;
-    })
-    .join("\n");
-}
+  const formattedLines: string[] = [];
+  let currentLength = 0;
+  let historyPruned = false;
 
-function convertDistanceToScore(distance: number): string {
-  if (Number.isNaN(distance) || distance <= 0) return "high";
-  if (distance < 0.6) return "high";
-  if (distance < 1.0) return "medium";
-  if (distance < 1.4) return "low";
-  return "very low";
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const entry = messages[i];
+    const speaker = entry.role === "assistant" ? "Assistant" : "User";
+    const line = `${speaker}: ${entry.content}`;
+
+    if (currentLength + line.length + (formattedLines.length > 0 ? "\n".length : 0) > maxChars) {
+      historyPruned = true;
+      break;
+    }
+
+    formattedLines.unshift(line);
+    currentLength += line.length + (formattedLines.length > 1 ? "\n".length : 0);
+  }
+
+  return { snippet: formattedLines.join("\n"), pruned: historyPruned };
 }
 
 function sanitizeLine(value: string | null, fallback: string): string {

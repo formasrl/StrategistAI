@@ -2,17 +2,29 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { MessageCircle, Send, Loader2, Bot, User } from 'lucide-react';
+import { MessageCircle, Send, Loader2, Bot, User, ChevronDown, ChevronUp, BookOpen } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { supabase } from '@/integrations/supabase/client';
 import { showError } from '@/utils/toast';
 import { cn } from '@/lib/utils';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
+
+interface ChatSource {
+  document_name: string;
+  chunk_preview: string;
+  relevance_score: number;
+}
 
 interface ChatMessage {
   id: string;
   sender: 'user' | 'ai';
   text: string;
   timestamp: string;
+  sources?: ChatSource[];
 }
 
 interface AiChatbotProps {
@@ -50,13 +62,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
       timestamp: new Date().toISOString(),
     };
 
-    const pendingMessages = [...messages, userMessage];
-    const recentMessagesPayload = pendingMessages.slice(-4).map((msg) => ({
-      sender: msg.sender,
-      text: msg.text,
-    }));
-
-    setMessages(pendingMessages);
+    setMessages((prev) => [...prev, userMessage]);
     setInputMessage('');
     setIsSending(true);
 
@@ -68,7 +74,6 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
           phaseId,
           stepId,
           documentId,
-          recentMessages: recentMessagesPayload,
         },
       });
 
@@ -83,24 +88,18 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
             timestamp: new Date().toISOString(),
           },
         ]);
-      } else if (data?.response) {
+      } else {
+        const aiText: string = data?.answer || data?.response || 'I did not receive a response from the AI assistant.';
+        const sources: ChatSource[] = Array.isArray(data?.sources) ? data.sources : [];
+
         const aiResponse: ChatMessage = {
           id: (Date.now() + 1).toString(),
           sender: 'ai',
-          text: data.response,
+          text: aiText,
           timestamp: new Date().toISOString(),
+          sources,
         };
         setMessages((prev) => [...prev, aiResponse]);
-      } else {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: (Date.now() + 1).toString(),
-            sender: 'ai',
-            text: 'I did not receive a response from the AI assistant.',
-            timestamp: new Date().toISOString(),
-          },
-        ]);
       }
     } catch (err: any) {
       console.error('Error invoking chat-ai-assistant:', err);
@@ -127,6 +126,44 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
     return 'General Chat';
   };
 
+  const renderSources = (sources?: ChatSource[]) => {
+    if (!sources || sources.length === 0) return null;
+
+    return (
+      <Collapsible className="mt-2 border-t border-border pt-2">
+        <CollapsibleTrigger asChild>
+          <button
+            type="button"
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+          >
+            <BookOpen className="h-3 w-3" />
+            Sources
+            <ChevronDown className="h-3 w-3 data-[state=open]:hidden" />
+            <ChevronUp className="h-3 w-3 hidden data-[state=open]:block" />
+          </button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="mt-2 space-y-2">
+          {sources.map((source, index) => (
+            <div
+              key={`${source.document_name}-${index}`}
+              className="rounded-md bg-muted/60 p-2 text-xs"
+            >
+              <div className="font-semibold text-foreground">
+                {source.document_name || 'Untitled Document'}
+              </div>
+              <div className="text-muted-foreground mt-1">
+                {source.chunk_preview}
+              </div>
+              <div className="mt-1 text-[10px] text-muted-foreground/80">
+                Relevance score: {source.relevance_score.toFixed(2)}
+              </div>
+            </div>
+          ))}
+        </CollapsibleContent>
+      </Collapsible>
+    );
+  };
+
   return (
     <Card className="flex flex-col h-full border-none shadow-none bg-transparent">
       <CardHeader className="p-4 pb-2 border-b border-border">
@@ -145,9 +182,10 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
             {messages.map((msg) => (
               <div
                 key={msg.id}
-                className={`flex items-start gap-3 ${
-                  msg.sender === 'user' ? 'justify-end' : 'justify-start'
-                }`}
+                className={cn(
+                  'flex items-start gap-3',
+                  msg.sender === 'user' ? 'justify-end' : 'justify-start',
+                )}
               >
                 {msg.sender === 'ai' && (
                   <Bot className="h-6 w-6 text-blue-500 flex-shrink-0 mt-1" />
@@ -162,8 +200,12 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
                 >
                   <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
                   <span className="block text-xs opacity-70 mt-1">
-                    {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    {new Date(msg.timestamp).toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
                   </span>
+                  {msg.sender === 'ai' && renderSources(msg.sources)}
                 </div>
                 {msg.sender === 'user' && (
                   <User className="h-6 w-6 text-gray-500 flex-shrink-0 mt-1" />
