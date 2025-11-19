@@ -14,4 +14,8 @@ export default defineConfig(() => ({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  define: {
+    // Fix for libraries (like react-quill) that expect 'global' to exist
+    global: "window",
+  },
 }));
