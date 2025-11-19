@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { showError, showSuccess } from '@/utils/toast';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import DocumentVersionList from '@/components/documents/DocumentVersionList';
 import DocumentHeader from '@/components/documents/DocumentHeader';
@@ -13,6 +13,7 @@ import { FileUp, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import StepSuggestionDialog from '@/components/documents/StepSuggestionDialog';
 import { AiReview, Document } from '@/types/supabase';
+import './DocumentEditor.css'; // Import custom CSS for Quill
 
 type DashboardOutletContext = {
   setAiReview?: (review: AiReview | null) => void;
@@ -571,7 +572,7 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
             />
           </div>
         </CardHeader>
-        <CardContent className="flex-1 flex flex-col p-6 pt-0">
+        <CardContent className="flex-1 flex flex-col p-6 pt-0 relative min-h-[300px]">
           {showPublishedBanner && (
             <div className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200">
               This document is published to RAG and locked for edits. Use “Disconnect” to make changes again.
@@ -583,6 +584,7 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
             </div>
           )}
           <ReactQuill
+            key={document.id + (isHistoricalView ? '-history' : '-current')}
             ref={quillRef}
             theme="snow"
             value={isHistoricalView ? viewingVersionContent ?? '' : content}
@@ -591,7 +593,7 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
             formats={formats}
             readOnly={isHistoricalView || isPublished || isUploadingFile}
             placeholder="Start writing your document here..."
-            className="flex-1 min-h-[300px] flex flex-col"
+            className="quill-editor-container"
           />
           <input
             type="file"
