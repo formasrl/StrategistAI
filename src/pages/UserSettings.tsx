@@ -28,32 +28,32 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Loader2, RefreshCcw } from 'lucide-react';
-import { useTheme } from 'next-themes'; // Import useTheme
+import { useTheme } from 'next-themes';
 
 const formSchema = z.object({
   openai_api_key: z.string().optional(),
   preferred_model: z.string().optional(),
   ai_enabled: z.boolean().default(true),
-  theme: z.enum(['light', 'dark']).default('light'), // Added theme
-  timezone: z.string().default('UTC'), // Added timezone
+  theme: z.enum(['light', 'dark']).default('light'),
+  timezone: z.string().default('UTC'),
 });
 
 const UserSettings: React.FC = () => {
   const { user, isLoading: isSessionLoading } = useSession();
-  const { setTheme } = useTheme(); // Use the theme hook
+  const { setTheme } = useTheme();
   const [isLoadingSettings, setIsLoadingSettings] = useState(true);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
-  const [hasFetchedInitialModels, setHasFetchedInitialModels] = useState(false); // Track if models were fetched on initial load
+  const [hasFetchedInitialModels, setHasFetchedInitialModels] = useState(false);
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       openai_api_key: '',
-      preferred_model: 'gpt-4o',
+      preferred_model: 'gpt-4o-mini', // Default model must match backend Edge Function defaults
       ai_enabled: true,
-      theme: 'light', // Default theme
-      timezone: 'UTC', // Default timezone
+      theme: 'light',
+      timezone: 'UTC',
     },
   });
 
@@ -91,9 +91,9 @@ const UserSettings: React.FC = () => {
         .sort();
 
       setAvailableModels(chatModels);
-      // If the preferred model is no longer available, or none is set, default to the first available or gpt-4o
+      // If the preferred model is no longer available, or none is set, default to the first available or gpt-4o-mini
       if (form.getValues('preferred_model') && !chatModels.includes(form.getValues('preferred_model'))) {
-        form.setValue('preferred_model', chatModels.length > 0 ? chatModels[0] : 'gpt-4o');
+        form.setValue('preferred_model', chatModels.length > 0 ? chatModels[0] : 'gpt-4o-mini');
       } else if (!form.getValues('preferred_model') && chatModels.length > 0) {
         form.setValue('preferred_model', chatModels[0]);
       }
@@ -101,7 +101,7 @@ const UserSettings: React.FC = () => {
     } catch (error: any) {
       showError(`Error fetching OpenAI models: ${error.message}`);
       setAvailableModels([]);
-      form.setValue('preferred_model', 'gpt-4o'); // Fallback to default
+      form.setValue('preferred_model', 'gpt-4o-mini'); // Fallback to default
     } finally {
       setIsLoadingModels(false);
     }
@@ -128,7 +128,7 @@ const UserSettings: React.FC = () => {
       } else if (data) {
         form.reset({
           openai_api_key: data.openai_api_key || '',
-          preferred_model: data.preferred_model || 'gpt-4o',
+          preferred_model: data.preferred_model || 'gpt-4o-mini', // Default model must match backend Edge Function defaults
           ai_enabled: data.ai_enabled ?? true,
           theme: (data.theme as 'light' | 'dark') || 'light',
           timezone: data.timezone || 'UTC',
@@ -141,7 +141,7 @@ const UserSettings: React.FC = () => {
     if (!isSessionLoading) {
       fetchSettings();
     }
-  }, [user, isSessionLoading, form]); // Removed fetchOpenAIModels from dependencies
+  }, [user, isSessionLoading, form]);
 
   const onSubmit = async (values: z.infer<typeof formSchema>) => {
     if (!user) {
@@ -284,8 +284,8 @@ const UserSettings: React.FC = () => {
                       ) : (
                         // Only show default if no API key is provided or models haven't been fetched
                         !openaiApiKey && !hasFetchedInitialModels && (
-                          <SelectItem value="gpt-4o">
-                            GPT-4o (Default)
+                          <SelectItem value="gpt-4o-mini"> {/* Default model must match backend Edge Function defaults */}
+                            GPT-4o-mini (Default)
                           </SelectItem>
                         )
                       )}
