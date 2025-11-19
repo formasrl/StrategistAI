@@ -435,7 +435,7 @@ async function retrieveMemories(
     return [];
   }
 
-  if (!Array.isArray(data)) {
+  if (!ArrayOf(data)) {
     return [];
   }
 

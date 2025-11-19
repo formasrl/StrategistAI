@@ -6,6 +6,12 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Helper: inline HTML stripper (replaces external import)
+function stripHtmlTags(htmlContent: string | null | undefined): string {
+  if (!htmlContent) return "";
+  return htmlContent.replace(/<[^>]*>/g, " ").trim();
+}
+
 const SUMMARIZATION_MODEL = Deno.env.get("STRATEGIST_SUMMARY_MODEL") ?? "gpt-4o-mini";
 const EMBEDDING_MODEL = Deno.env.get("STRATEGIST_EMBEDDING_MODEL") ?? "text-embedding-3-small";
 
