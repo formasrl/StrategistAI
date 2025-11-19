@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
@@ -12,6 +12,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
+import { Link } from 'react-router-dom'; // Import Link for navigation
 
 interface ChatSource {
   document_name: string;
@@ -47,27 +48,34 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
 
   useEffect(scrollToBottom, [messages]);
 
-  const handleSendMessage = async (e?: React.FormEvent) => {
-    e?.preventDefault();
-    if (!inputMessage.trim() || isSending) return;
+  // Helper to render markdown-style links
+  const renderMessageContent = useCallback((text: string) => {
+    const parts: React.ReactNode[] = [];
+    const regex = /\[([^\]]+)\]\(([^)]+)\)/g;
+    let lastIndex = 0;
+    let match;
 
-    if (!projectId || !stepId) {
-      showError('Select a project and step to chat with StrategistAI.');
-      return;
+    while ((match = regex.exec(text)) !== null) {
+      const [fullMatch, linkText, linkPath] = match;
+      if (match.index > lastIndex) {
+        parts.push(text.substring(lastIndex, match.index));
+      }
+      parts.push(
+        <Link key={match.index} to={linkPath} className="text-blue-400 hover:underline">
+          {linkText}
+        </Link>
+      );
+      lastIndex = regex.lastIndex;
     }
 
-    const userMessage: ChatMessage = {
-      id: Date.now().toString(),
-      sender: 'user',
-      text: inputMessage.trim(),
-      timestamp: new Date().toISOString(),
-    };
+    if (lastIndex < text.length) {
+      parts.push(text.substring(lastIndex));
+    }
 
-    setMessages((prev) => [...prev, userMessage]);
-    setInputMessage('');
-    setIsSending(true);
+    return <>{parts}</>;
+  }, []);
 
-    // Add a placeholder for the AI's streaming response
+  const sendToAiAssistant = async (userMessageText: string) => {
     const aiPlaceholderMessage: ChatMessage = {
       id: (Date.now() + 1).toString(),
       sender: 'ai',
@@ -87,7 +95,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
             Authorization: `Bearer ${supabase.auth.session()?.access_token}`,
           },
           body: JSON.stringify({
-            message: userMessage.text,
+            message: userMessageText,
             projectId,
             phaseId,
             stepId,
@@ -113,7 +121,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
         if (done) break;
 
         const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n\n').filter(Boolean); // Filter out empty strings
+        const lines = chunk.split('\n\n').filter(Boolean);
 
         for (const line of lines) {
           if (line.startsWith('data: ')) {
@@ -172,9 +180,78 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
             : msg,
         ),
       );
-    } finally {
-      setIsSending(false);
     }
+  };
+
+  const handleProjectLevelChat = async (query: string) => {
+    const aiResponseId = (Date.now() + 1).toString();
+    let aiResponseText = "I noticed you're asking a question without a specific document or step selected. Selecting a document gives better answers as it provides more context for me to assist you effectively.";
+
+    const { data: allSteps, error: stepsError } = await supabase
+      .from('steps')
+      .select('id, step_name, description, phase_id')
+      .eq('project_id', projectId);
+
+    if (stepsError) {
+      console.error("Error fetching steps for suggestions:", stepsError);
+      aiResponseText += "\n\nHowever, I couldn't fetch relevant steps at this moment. Please try again later.";
+    } else if (allSteps && allSteps.length > 0) {
+      const lowerCaseQuery = query.toLowerCase();
+      const suggestedSteps = allSteps.filter(step =>
+        step.step_name?.toLowerCase().includes(lowerCaseQuery) ||
+        step.description?.toLowerCase().includes(lowerCaseQuery)
+      ).slice(0, 3); // Limit to top 3 suggestions
+
+      if (suggestedSteps.length > 0) {
+        aiResponseText += "\n\nPerhaps you're looking for one of these steps? Click on a step to navigate to its workspace:";
+        suggestedSteps.forEach(step => {
+          aiResponseText += `\n- [${step.step_name}](/dashboard/${projectId}/step/${step.id})`;
+        });
+      } else {
+        aiResponseText += "\n\nI couldn't find any steps directly related to your query. Please try rephrasing or select a step from the roadmap.";
+      }
+    } else {
+      aiResponseText += "\n\nThere are no steps defined for this project yet. Please create some steps first.";
+    }
+
+    const aiMessage: ChatMessage = {
+      id: aiResponseId,
+      sender: 'ai',
+      text: aiResponseText,
+      timestamp: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, aiMessage]);
+  };
+
+  const handleSendMessage = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!inputMessage.trim() || isSending) return;
+
+    if (!projectId) {
+      showError('Select a project to chat with StrategistAI.');
+      return;
+    }
+
+    const userMessageText = inputMessage.trim();
+    const userMessage: ChatMessage = {
+      id: Date.now().toString(),
+      sender: 'user',
+      text: userMessageText,
+      timestamp: new Date().toISOString(),
+    };
+
+    setMessages((prev) => [...prev, userMessage]);
+    setInputMessage('');
+    setIsSending(true);
+
+    if (!stepId && !documentId) {
+      // User is chatting at project level without a specific step/document
+      await handleProjectLevelChat(userMessageText);
+    } else {
+      // User is chatting with a specific step/document, proceed with AI assistant
+      await sendToAiAssistant(userMessageText);
+    }
+    setIsSending(false);
   };
 
   const getContextTitle = () => {
@@ -257,7 +334,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
                       : 'bg-muted text-muted-foreground rounded-bl-none',
                   )}
                 >
-                  <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
+                  <p className="text-sm whitespace-pre-wrap">{renderMessageContent(msg.text)}</p>
                   <span className="block text-xs opacity-70 mt-1">
                     {new Date(msg.timestamp).toLocaleTimeString([], {
                       hour: '2-digit',
