@@ -387,12 +387,9 @@ serve(async (req) => {
       }
 
       if (totalPromptTokens > modelTokenLimit) {
-        return respond(
-          {
-            error: `Your request is too long (${totalPromptTokens} tokens). Even after truncating context, it exceeds the model's ${modelTokenLimit} token limit. Please shorten your query or document content.`,
-          },
-          400
-        );
+        return respond({
+          error: `Your request is too long (${totalPromptTokens} tokens). Even after truncating context, it exceeds the model's ${modelTokenLimit} token limit. Please shorten your query or document content.`,
+        }, 400);
       }
     }
 
@@ -410,6 +407,7 @@ serve(async (req) => {
           { role: "system", content: systemPrompt },
           { role: "user", content: finalPrompt },
         ],
+        stream: true, // Enable streaming
       }),
     });
 
@@ -419,36 +417,75 @@ serve(async (req) => {
       return respond({ error: "AI coach request failed." }, chatResponse.status);
     }
 
-    const completion = await chatResponse.json();
-    const reply = completion?.choices?.[0]?.message?.content?.trim();
+    const stream = new ReadableStream({
+      async start(controller) {
+        const reader = chatResponse.body?.getReader();
+        const decoder = new TextDecoder();
+        let fullReplyContent = "";
 
-    // Log chat completion AI usage
-    await logAiUsage(
-      supabaseClient,
-      project.id,
-      project.user_id,
-      "chat-ai-assistant (chat)",
-      CHAT_MODEL,
-      finalPrompt.length,
-      reply?.length ?? 0
-    );
+        try {
+          while (true) {
+            const { done, value } = await reader!.read();
+            if (done) break;
 
-    if (!reply) {
-      return respond({ error: "AI response was empty." }, 500);
-    }
+            const chunk = decoder.decode(value, { stream: true });
+            const lines = chunk.split("\n\n");
 
-    await supabaseClient.from("chat_messages").insert({
-      chat_session_id: currentChatSessionId,
-      role: "assistant",
-      content: reply,
+            for (const line of lines) {
+              if (line.startsWith("data: ")) {
+                const data = line.substring(6);
+                if (data === "[DONE]") {
+                  continue;
+                }
+                try {
+                  const json = JSON.parse(data);
+                  const token = json.choices[0].delta.content;
+                  if (token) {
+                    fullReplyContent += token;
+                    controller.enqueue(`data: ${JSON.stringify({ type: "token", content: token })}\n\n`);
+                  }
+                } catch (e) {
+                  console.error("Error parsing stream chunk:", e, data);
+                }
+              }
+            }
+          }
+
+          // After stream is done, save full reply and log usage
+          await supabaseClient.from("chat_messages").insert({
+            chat_session_id: currentChatSessionId,
+            role: "assistant",
+            content: fullReplyContent,
+          });
+
+          await logAiUsage(
+            supabaseClient,
+            project.id,
+            project.user_id,
+            "chat-ai-assistant (chat)",
+            CHAT_MODEL,
+            finalPrompt.length,
+            fullReplyContent.length
+          );
+
+          // Send sources as a final event
+          controller.enqueue(`data: ${JSON.stringify({ type: "sources", content: sources, chatSessionId: currentChatSessionId, metadata: { history_pruned: historyPruned } })}\n\n`);
+        } catch (error) {
+          console.error("Stream processing error:", error);
+          controller.enqueue(`data: ${JSON.stringify({ type: "error", content: "An error occurred during streaming." })}\n\n`);
+        } finally {
+          controller.close();
+        }
+      },
     });
 
-    return respond({
-      answer: reply,
-      response: reply, // Backward-compatible
-      sources,
-      chatSessionId: currentChatSessionId,
-      metadata: { history_pruned: historyPruned },
+    return new Response(stream, {
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+      },
     });
   } catch (error) {
     console.error("chat-ai-assistant error", error);

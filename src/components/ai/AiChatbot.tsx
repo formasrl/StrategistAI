@@ -38,6 +38,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [currentChatSessionId, setCurrentChatSessionId] = useState<string | undefined>(undefined);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -66,53 +67,111 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
     setInputMessage('');
     setIsSending(true);
 
+    // Add a placeholder for the AI's streaming response
+    const aiPlaceholderMessage: ChatMessage = {
+      id: (Date.now() + 1).toString(),
+      sender: 'ai',
+      text: '', // Empty text to start streaming into
+      timestamp: new Date().toISOString(),
+      sources: [], // Placeholder for sources
+    };
+    setMessages((prev) => [...prev, aiPlaceholderMessage]);
+
     try {
-      const { data, error } = await supabase.functions.invoke('chat-ai-assistant', {
-        body: {
-          message: userMessage.text,
-          projectId,
-          phaseId,
-          stepId,
-          documentId,
-        },
-      });
-
-      if (error) {
-        showError(`AI Chatbot error: ${error.message}`);
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: (Date.now() + 1).toString(),
-            sender: 'ai',
-            text: 'Sorry, I encountered an error. Please try again later.',
-            timestamp: new Date().toISOString(),
+      const response = await fetch(
+        `${supabase.supabaseUrl}/functions/v1/chat-ai-assistant`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${supabase.auth.session()?.access_token}`,
           },
-        ]);
-      } else {
-        const aiText: string = data?.answer || data?.response || 'I did not receive a response from the AI assistant.';
-        const sources: ChatSource[] = Array.isArray(data?.sources) ? data.sources : [];
+          body: JSON.stringify({
+            message: userMessage.text,
+            projectId,
+            phaseId,
+            stepId,
+            documentId,
+            chatSessionId: currentChatSessionId,
+          }),
+        },
+      );
 
-        const aiResponse: ChatMessage = {
-          id: (Date.now() + 1).toString(),
-          sender: 'ai',
-          text: aiText,
-          timestamp: new Date().toISOString(),
-          sources,
-        };
-        setMessages((prev) => [...prev, aiResponse]);
+      if (!response.ok || !response.body) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to get AI response.');
       }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let accumulatedContent = '';
+      let aiResponseSources: ChatSource[] = [];
+      let newChatSessionId: string | undefined = currentChatSessionId;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n\n').filter(Boolean); // Filter out empty strings
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.substring(6);
+            try {
+              const json = JSON.parse(data);
+              if (json.type === 'token') {
+                accumulatedContent += json.content;
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === aiPlaceholderMessage.id
+                      ? { ...msg, text: accumulatedContent }
+                      : msg,
+                  ),
+                );
+              } else if (json.type === 'sources') {
+                aiResponseSources = json.content;
+                newChatSessionId = json.chatSessionId;
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === aiPlaceholderMessage.id
+                      ? { ...msg, sources: aiResponseSources }
+                      : msg,
+                  ),
+                );
+              } else if (json.type === 'error') {
+                showError(`AI Chatbot error: ${json.content}`);
+                accumulatedContent += `\n\nError: ${json.content}`;
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === aiPlaceholderMessage.id
+                      ? { ...msg, text: accumulatedContent }
+                      : msg,
+                  ),
+                );
+              }
+            } catch (e) {
+              console.error('Error parsing stream chunk:', e, data);
+            }
+          }
+        }
+      }
+      setCurrentChatSessionId(newChatSessionId);
     } catch (err: any) {
       console.error('Error invoking chat-ai-assistant:', err);
       showError(`An unexpected error occurred: ${err.message}`);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: (Date.now() + 1).toString(),
-          sender: 'ai',
-          text: 'Sorry, I encountered an unexpected error. Please try again later.',
-          timestamp: new Date().toISOString(),
-        },
-      ]);
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === aiPlaceholderMessage.id
+            ? {
+                ...msg,
+                text:
+                  accumulatedContent ||
+                  'Sorry, I encountered an unexpected error. Please try again later.',
+              }
+            : msg,
+        ),
+      );
     } finally {
       setIsSending(false);
     }
