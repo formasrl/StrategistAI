@@ -61,6 +61,8 @@ serve(async (req) => {
       summary: item.summary,
       title: item.title,
       tags: item.tags,
+      chunk_preview: item.chunk_preview, // NEW
+      relevance_score: item.relevance_score, // NEW
     }));
 
     console.log(`[search-embeddings] Returned ${results.length} matches for project ${project_id}`);
