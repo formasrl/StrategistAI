@@ -546,6 +546,7 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
               onClick={handleUploadFileButtonClick}
               variant="outline"
               disabled={isPublished || isHistoricalView || isUploadingFile}
+              title="Supported formats: .docx, .html, .md"
             >
               {isUploadingFile ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
