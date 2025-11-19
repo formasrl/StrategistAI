@@ -10,3 +10,4 @@ export type Comment = Database['public']['Tables']['comments']['Row'];
 export type UserSettings = Database['public']['Tables']['user_settings']['Row'];
 export type ChatSession = Database['public']['Tables']['chat_sessions']['Row'];
 export type ChatMessage = Database['public']['Tables']['chat_messages']['Row'];
+export type DocumentEmbedding = Database['public']['Tables']['document_embeddings']['Row'];
