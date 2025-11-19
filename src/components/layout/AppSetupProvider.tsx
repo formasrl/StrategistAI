@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, createContext, useContext } from 'react';
+import React, { useEffect, useRef, useState, createContext, useContext, useCallback } from 'react';
 import { useTheme } from 'next-themes';
 import { useSession } from '@/integrations/supabase/SessionContextProvider';
 import { supabase } from '@/integrations/supabase/client';
