@@ -221,7 +221,7 @@ serve(async (req) => {
       {
         input_project_id: projectId,
         query_embedding: queryEmbedding,
-        top_k: 3,
+        top_k: 7, // Increased from 3 to 7 for multi-document retrieval
       }
     );
 
@@ -285,6 +285,7 @@ serve(async (req) => {
       "Focus on guidance, critique, and strategic alignment.",
       "Always respect previously published decisions and call out conflicts politely.",
       "If information is missing, ask clarifying questions instead of guessing.",
+      "Synthesize information from the 'RELEVANT SEMANTIC MEMORIES' section to provide comprehensive answers.", // New instruction for synthesis
     ].join(" ");
 
     const modelTokenLimit = getModelTokenLimit(CHAT_MODEL);
@@ -425,7 +426,7 @@ serve(async (req) => {
 
         try {
           while (true) {
-            const { done, value } = await reader!.read();
+            const { done, value } = await reader.read();
             if (done) break;
 
             const chunk = decoder.decode(value, { stream: true });
