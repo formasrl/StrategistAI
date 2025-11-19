@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button';
 import StepSuggestionDialog from '@/components/documents/StepSuggestionDialog';
 import { AiReview, Document } from '@/types/supabase';
 import './DocumentEditor.css'; // Import custom CSS for Quill
+import { cn } from '@/lib/utils'; // Import cn for conditional classNames
 
 type DashboardOutletContext = {
   setAiReview?: (review: AiReview | null) => void;
@@ -466,21 +467,17 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
 
   const modules = useMemo(
     () => ({
-      toolbar: {
-        container: [
-          [{ header: [1, 2, false] }],
-          ['bold', 'italic', 'underline', 'strike', 'blockquote'],
-          [{ list: 'ordered' }, { list: 'bullet' }],
-          [{ indent: '-1' }, { indent: '+1' }],
-          ['link', 'image', 'uploadFile'],
-          ['clean'],
-        ],
-        handlers: {
-          uploadFile: handleUploadFileButtonClick,
-        },
-      },
+      toolbar: [
+        [{ header: [1, 2, false] }],
+        ['bold', 'italic', 'underline', 'strike', 'blockquote'],
+        [{ list: 'ordered' }, { list: 'bullet' }],
+        [{ indent: '-1' }, { indent: '+1' }],
+        ['link', 'image'], // Removed 'uploadFile'
+        ['clean'],
+      ],
+      // Removed custom handlers for 'uploadFile'
     }),
-    [handleUploadFileButtonClick],
+    [], // No dependencies needed if no custom handlers
   );
 
   const formats = useMemo(
@@ -496,7 +493,7 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
       'indent',
       'link',
       'image',
-      'uploadFile',
+      // Removed 'uploadFile'
     ],
     [],
   );
@@ -594,7 +591,7 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
             formats={formats}
             readOnly={isHistoricalView || isPublished || isUploadingFile}
             placeholder="Start writing your document here..."
-            className="quill-editor-container"
+            className={cn("quill-editor-container", "min-h-[400px]")}
           />
           <input
             type="file"
