@@ -4,7 +4,9 @@ export type Project = Database['public']['Tables']['projects']['Row'] & {
   project_profile_summary: string | null;
 };
 export type Phase = Database['public']['Tables']['phases']['Row'];
-export type Step = Database['public']['Tables']['steps']['Row'];
+export type Step = Database['public']['Tables']['steps']['Row'] & {
+  updated_at: string | null;
+};
 export type Document = Database['public']['Tables']['documents']['Row'] & {
   summary: string | null;
   key_decisions: string[] | null;

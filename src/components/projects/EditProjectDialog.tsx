@@ -73,7 +73,6 @@ const EditProjectDialog: React.FC<EditProjectDialogProps> = ({
         name: values.name,
         business_type: values.business_type || null,
         timeline: values.timeline || null,
-        updated_at: new Date().toISOString(),
       })
       .eq('id', project.id);
 
