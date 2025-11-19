@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState, createContext, useContext } from 'react';
 import { useTheme } from 'next-themes';
 import { useSession } from '@/integrations/supabase/SessionContextProvider';
 import { supabase } from '@/integrations/supabase/client';
@@ -7,22 +7,54 @@ import { RealtimeChannel } from '@supabase/supabase-js';
 import { showError, showSuccess } from '@/utils/toast';
 import { Document } from '@/types/supabase';
 
+interface AppSetupContextType {
+  onboardingTourCompleted: boolean;
+  markOnboardingTourComplete: () => Promise<void>;
+}
+
+const AppSetupContext = createContext<AppSetupContextType | undefined>(undefined);
+
+export const useAppSetup = () => {
+  const context = useContext(AppSetupContext);
+  if (context === undefined) {
+    throw new Error('useAppSetup must be used within an AppSetupProvider');
+  }
+  return context;
+};
+
 const AppSetupProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, isLoading: isSessionLoading } = useSession();
   const { setTheme } = useTheme();
-  const [isSetupComplete, setIsSetupComplete] = React.useState(false);
+  const [isSetupComplete, setIsSetupComplete] = useState(false);
+  const [onboardingTourCompleted, setOnboardingTourCompleted] = useState(false);
   const documentStatusChannelRef = useRef<RealtimeChannel | null>(null);
+
+  const markOnboardingTourComplete = useCallback(async () => {
+    if (!user) return;
+    const { error } = await supabase
+      .from('user_settings')
+      .upsert(
+        { user_id: user.id, onboarding_tour_completed: true, updated_at: new Date().toISOString() },
+        { onConflict: 'user_id' }
+      );
+    if (error) {
+      console.error('Failed to mark onboarding tour complete:', error);
+      showError('Failed to save tour completion status.');
+    } else {
+      setOnboardingTourCompleted(true);
+    }
+  }, [user]);
 
   useEffect(() => {
     const performSetup = async () => {
       if (!isSessionLoading) {
         let userTheme: 'light' | 'dark' = 'light';
-        // let userTimezone: string = 'UTC'; // No longer directly used here, but initializeUserTimezone handles it
+        let tourStatus = false;
 
         if (user) {
           const { data, error } = await supabase
             .from('user_settings')
-            .select('theme, timezone')
+            .select('theme, timezone, onboarding_tour_completed')
             .eq('user_id', user.id)
             .single();
 
@@ -30,7 +62,7 @@ const AppSetupProvider: React.FC<{ children: React.ReactNode }> = ({ children })
             console.error("Error fetching user settings for setup:", error);
           } else if (data) {
             userTheme = (data.theme as 'light' | 'dark') || 'light';
-            // userTimezone = data.timezone || 'UTC'; // Handled by initializeUserTimezone
+            tourStatus = data.onboarding_tour_completed ?? false;
           }
         }
 
@@ -40,6 +72,7 @@ const AppSetupProvider: React.FC<{ children: React.ReactNode }> = ({ children })
         // Initialize timezone utility
         await initializeUserTimezone(user?.id);
 
+        setOnboardingTourCompleted(tourStatus);
         setIsSetupComplete(true);
       }
     };
@@ -127,7 +160,11 @@ const AppSetupProvider: React.FC<{ children: React.ReactNode }> = ({ children })
     return null; // Or a loading spinner if desired
   }
 
-  return <>{children}</>;
+  return (
+    <AppSetupContext.Provider value={{ onboardingTourCompleted, markOnboardingTourComplete }}>
+      {children}
+    </AppSetupContext.Provider>
+  );
 };
 
 export default AppSetupProvider;

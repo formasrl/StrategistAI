@@ -47,7 +47,7 @@ const AiPanelContent: React.FC<AiPanelContentProps> = ({
         <p className="text-sm text-muted-foreground">
           Generate an AI-powered review to get insights and suggestions for your document.
         </p>
-        <Button onClick={() => onGenerateReview(documentId)} disabled={isAiReviewLoading} className="w-full">
+        <Button id="tour-generate-review" onClick={() => onGenerateReview(documentId)} disabled={isAiReviewLoading} className="w-full">
           <Brain className="mr-2 h-4 w-4" /> Generate AI Review
         </Button>
       </Card>

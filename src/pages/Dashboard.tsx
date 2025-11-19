@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { useSession } from '@/integrations/supabase/SessionContextProvider';
-import { useNavigate, Outlet, useParams } from 'react-router-dom';
+import { useNavigate, Outlet, useParams, useLocation } from 'react-router-dom'; // Import useLocation
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 import { showSuccess, showError } from '@/utils/toast';
@@ -10,15 +10,20 @@ import { PlusCircle, Settings, LogOut, UserCircle2 } from 'lucide-react';
 import AiPanel from '@/components/ai/AiPanel';
 import { AiReview, Project, Phase, Step, Document } from '@/types/supabase';
 import CurrentContextDisplay from '@/components/layout/CurrentContextDisplay';
+import OnboardingTour from '@/components/onboarding/OnboardingTour'; // Import OnboardingTour
+import { useAppSetup } from '@/components/layout/AppSetupProvider'; // Import useAppSetup
 
 const Dashboard = () => {
   const { session, isLoading } = useSession();
   const navigate = useNavigate();
+  const location = useLocation(); // Get current location
   const { projectId, documentId, stepId } = useParams<{
     projectId?: string;
     documentId?: string;
     stepId?: string;
   }>();
+
+  const { onboardingTourCompleted, markOnboardingTourComplete } = useAppSetup(); // Use the new context
 
   const [aiPanelDocumentId, setAiPanelDocumentId] = useState<string | undefined>(documentId);
   const [aiPanelStepId, setAiPanelStepId] = useState<string | undefined>(stepId);
@@ -211,51 +216,62 @@ const Dashboard = () => {
     isAiReviewLoading,
   };
 
+  // Determine if the tour should run
+  const shouldRunTour = !onboardingTourCompleted && location.pathname.startsWith('/dashboard');
+
   return (
-    <DashboardLayout
-      sidebar={
-        <>
-          <div className="space-y-4 pb-4 shrink-0">
-            <h2 className="text-xl font-semibold text-sidebar-foreground">Your Projects</h2>
-            <Button onClick={() => navigate('/project/new')} className="w-full" variant="outline">
-              <PlusCircle className="mr-2 h-4 w-4" /> Create New Project
-            </Button>
-            <CurrentContextDisplay
-              activeProject={activeProject}
-              activePhase={activePhase}
-              activeStep={activeStep}
-              activeDocument={activeDocument}
-            />
-          </div>
-          <div className="flex-1 overflow-y-auto pr-2">
-            <ProjectList />
-          </div>
-          <div className="pt-4 border-t border-sidebar-border space-y-2 shrink-0">
-            <Button onClick={() => navigate('/dashboard/profile')} className="w-full" variant="ghost">
-              <UserCircle2 className="mr-2 h-4 w-4" /> Profile
-            </Button>
-            <Button onClick={() => navigate('/dashboard/settings')} className="w-full" variant="ghost">
-              <Settings className="mr-2 h-4 w-4" /> Settings
-            </Button>
-            <Button onClick={handleLogout} variant="destructive" className="w-full">
-              <LogOut className="mr-2 h-4 w-4" /> Logout
-            </Button>
-          </div>
-        </>
-      }
-      mainContent={<Outlet context={outletContextValue} />}
-      aiPanel={
-        <AiPanel
-          projectId={projectId}
-          phaseId={aiPanelPhaseId}
-          stepId={aiPanelStepId}
-          documentId={aiPanelDocumentId}
-          aiReview={activeAiReview}
-          isAiReviewLoading={isAiReviewLoading}
-          onGenerateReview={handleGenerateAiReviewFromPanel}
+    <>
+      <DashboardLayout
+        sidebar={
+          <>
+            <div className="space-y-4 pb-4 shrink-0">
+              <h2 className="text-xl font-semibold text-sidebar-foreground">Your Projects</h2>
+              <Button onClick={() => navigate('/project/new')} className="w-full" variant="outline">
+                <PlusCircle className="mr-2 h-4 w-4" /> Create New Project
+              </Button>
+              <CurrentContextDisplay
+                activeProject={activeProject}
+                activePhase={activePhase}
+                activeStep={activeStep}
+                activeDocument={activeDocument}
+              />
+            </div>
+            <div className="flex-1 overflow-y-auto pr-2">
+              <ProjectList />
+            </div>
+            <div className="pt-4 border-t border-sidebar-border space-y-2 shrink-0">
+              <Button onClick={() => navigate('/dashboard/profile')} className="w-full" variant="ghost">
+                <UserCircle2 className="mr-2 h-4 w-4" /> Profile
+              </Button>
+              <Button onClick={() => navigate('/dashboard/settings')} className="w-full" variant="ghost">
+                <Settings className="mr-2 h-4 w-4" /> Settings
+              </Button>
+              <Button onClick={handleLogout} variant="destructive" className="w-full">
+                <LogOut className="mr-2 h-4 w-4" /> Logout
+              </Button>
+            </div>
+          </>
+        }
+        mainContent={<Outlet context={outletContextValue} />}
+        aiPanel={
+          <AiPanel
+            projectId={projectId}
+            phaseId={aiPanelPhaseId}
+            stepId={aiPanelStepId}
+            documentId={aiPanelDocumentId}
+            aiReview={activeAiReview}
+            isAiReviewLoading={isAiReviewLoading}
+            onGenerateReview={handleGenerateAiReviewFromPanel}
+          />
+        }
+      />
+      {shouldRunTour && (
+        <OnboardingTour
+          runTour={shouldRunTour}
+          onTourComplete={markOnboardingTourComplete}
         />
-      }
-    />
+      )}
+    </>
   );
 };
 

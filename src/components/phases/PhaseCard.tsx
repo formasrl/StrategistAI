@@ -98,7 +98,7 @@ const PhaseCard: React.FC<PhaseCardProps> = ({ phase, projectId, onPhaseUpdated 
   };
 
   return (
-    <Card className="mb-4">
+    <Card className="mb-4" id={`tour-phases-steps-${phase.id}`}> {/* Add ID for the tour */}
       <Collapsible open={isOpen} onOpenChange={setIsOpen}>
         <CardHeader className="p-4 pb-2">
           <CollapsibleTrigger asChild>

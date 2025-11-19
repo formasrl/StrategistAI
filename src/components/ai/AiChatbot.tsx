@@ -364,6 +364,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
       <CardFooter className="p-4 pt-2 border-t border-border">
         <form onSubmit={handleSendMessage} className="flex w-full space-x-2">
           <Input
+            id="tour-ai-chat-input" // ID for the tour
             placeholder="Ask your AI assistant..."
             value={inputMessage}
             onChange={(e) => setInputMessage(e.target.value)}

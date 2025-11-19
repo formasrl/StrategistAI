@@ -22,7 +22,7 @@ const CurrentContextDisplay: React.FC<CurrentContextDisplayProps> = ({
   }
 
   return (
-    <Card className="mb-4 bg-sidebar-accent border-sidebar-border text-sidebar-foreground">
+    <Card className="mb-4 bg-sidebar-accent border-sidebar-border text-sidebar-foreground" id="tour-ai-memory"> {/* Add ID for the tour */}
       <CardHeader className="p-3 pb-2">
         <CardTitle className="text-sm font-semibold flex items-center gap-2">
           <FolderOpen className="h-4 w-4" /> Current Context
