@@ -57,6 +57,13 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
     }
   };
 
+  const generateId = () => {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      return crypto.randomUUID();
+    }
+    return Date.now().toString() + Math.random().toString(36).substring(2);
+  };
+
   // Fetch chat history when context changes
   useEffect(() => {
     let isMounted = true;
@@ -183,7 +190,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
       return;
     }
 
-    const tempId = Date.now().toString();
+    const tempId = generateId();
     const aiPlaceholderMessage: ChatMessage = {
       id: tempId,
       sender: 'ai',
@@ -313,7 +320,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
   };
 
   const handleProjectLevelChat = async (query: string) => {
-    const aiResponseId = Date.now().toString();
+    const aiResponseId = generateId();
     let aiResponseText = "I noticed you're asking a question without a specific document or step selected. Selecting a document gives better answers as it provides more context for me to assist you effectively.";
 
     const { data: allSteps, error: stepsError } = await supabase
@@ -363,7 +370,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
 
     const userMessageText = inputMessage.trim();
     const userMessage: ChatMessage = {
-      id: Date.now().toString(),
+      id: generateId(),
       sender: 'user',
       text: userMessageText,
       timestamp: new Date().toISOString(),
