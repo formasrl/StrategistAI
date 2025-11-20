@@ -115,8 +115,13 @@ serve(async (req) => {
       chatSessionId?: string;
     } = body ?? {};
 
-    if (!message || !projectId || !stepId) {
-      return respond({ error: "message, projectId, and stepId are required." }, 400);
+    if (!message || !projectId) {
+      return respond({ error: "message and projectId are required." }, 400);
+    }
+
+    // Relaxed validation: we need EITHER stepId OR documentId (from which we can derive stepId)
+    if (!stepId && !documentId) {
+       return respond({ error: "Either stepId or documentId is required." }, 400);
     }
 
     const supabaseClient = createClient(
@@ -125,12 +130,14 @@ serve(async (req) => {
       { global: { headers: { Authorization: authHeader } } }
     );
 
+    let effectiveStepId = stepId;
+
     let currentChatSessionId = incomingChatSessionId;
 
     if (!currentChatSessionId) {
       const { data: newSession, error: sessionError } = await supabaseClient
         .from("chat_sessions")
-        .insert({ project_id: projectId, step_id: stepId, document_id: documentId || null })
+        .insert({ project_id: projectId, step_id: stepId || null, document_id: documentId || null })
         .select("id")
         .single();
 
@@ -180,8 +187,16 @@ serve(async (req) => {
       if (docError || !documentDetails) {
         return respond({ error: "Document not found or accessible." }, 404);
       }
-      if (documentDetails.project_id !== projectId || documentDetails.step_id !== stepId) {
-        return respond({ error: "Document does not belong to the provided project or step." }, 403);
+      if (documentDetails.project_id !== projectId) {
+        return respond({ error: "Document does not belong to the provided project." }, 403);
+      }
+      
+      // Derive stepId from document if missing
+      if (!effectiveStepId) {
+        effectiveStepId = documentDetails.step_id;
+      } else if (documentDetails.step_id !== effectiveStepId) {
+         // Warn but don't fail? Or strictly enforce? Enforcing for now.
+         return respond({ error: "Document does not belong to the provided step." }, 403);
       }
 
       currentDocumentContextText = buildDocumentContextString(
@@ -195,6 +210,10 @@ serve(async (req) => {
       );
       documentSummaryForSemanticSearch =
         typeof documentDetails.summary === "string" ? documentDetails.summary : undefined;
+    }
+
+    if (!effectiveStepId) {
+       return respond({ error: "Could not determine active step context." }, 400);
     }
 
     // Layer 3: Semantic Retrieval (search_document_embeddings)
@@ -250,7 +269,7 @@ serve(async (req) => {
       .select(
         "id, step_name, description, why_matters, timeline, phases(phase_name, phase_number, project_id)"
       )
-      .eq("id", stepId)
+      .eq("id", effectiveStepId)
       .maybeSingle();
 
     if (stepError || !stepData) {

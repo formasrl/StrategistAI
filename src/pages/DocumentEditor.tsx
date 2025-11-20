@@ -13,8 +13,8 @@ import { FileUp, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import StepSuggestionDialog from '@/components/documents/StepSuggestionDialog';
 import { AiReview, Document } from '@/types/supabase';
-import './DocumentEditor.css'; // Import custom CSS for Quill
-import { cn } from '@/lib/utils'; // Import cn for conditional classNames
+import './DocumentEditor.css';
+import { cn } from '@/lib/utils';
 
 type DashboardOutletContext = {
   setAiReview?: (review: AiReview | null) => void;
@@ -78,10 +78,9 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
     [setIsAiReviewLoadingProp, contextSetIsAiReviewLoading],
   );
 
-  useEffect(() => {
-    contextSetStepIdForAiPanel?.(undefined);
-  }, [contextSetStepIdForAiPanel]);
+  const [document, setDocument] = useState<Document | null>(null);
 
+  // Update AI Panel Context: Document ID
   useEffect(() => {
     if (currentDocumentId) {
       contextSetDocumentIdForAiPanel?.(currentDocumentId);
@@ -93,7 +92,16 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
     };
   }, [currentDocumentId, contextSetDocumentIdForAiPanel]);
 
-  const [document, setDocument] = useState<Document | null>(null);
+  // Update AI Panel Context: Step ID (once document is loaded)
+  useEffect(() => {
+    if (document?.step_id) {
+      contextSetStepIdForAiPanel?.(document.step_id);
+    }
+    // We do NOT revert this on unmount because the user might navigate 
+    // to another tab in the dashboard but stay in the same "context" 
+    // broadly speaking.
+  }, [document?.step_id, contextSetStepIdForAiPanel]);
+
   const [isLoadingDocument, setIsLoadingDocument] = useState(true);
   const [content, setContent] = useState<string>('');
   const [status, setStatus] = useState<Document['status']>('draft' as Document['status']);
@@ -352,7 +360,6 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
     }
 
     setIsUploadingFile(true);
-    const reader = new FileReader();
     let contentHtml = '';
     let rawTextContent = '';
 
@@ -408,6 +415,7 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
         fileInputRef.current.value = '';
       }
     }
+    const reader = new FileReader(); // Moved inside for proper scoping if needed, or clean up if unused.
   };
 
   const fetchStepSuggestions = async (projectId: string, documentContent: string) => {
@@ -472,12 +480,11 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
         ['bold', 'italic', 'underline', 'strike', 'blockquote'],
         [{ list: 'ordered' }, { list: 'bullet' }],
         [{ indent: '-1' }, { indent: '+1' }],
-        ['link', 'image'], // Removed 'uploadFile'
+        ['link', 'image'],
         ['clean'],
       ],
-      // Removed custom handlers for 'uploadFile'
     }),
-    [], // No dependencies needed if no custom handlers
+    [],
   );
 
   const formats = useMemo(
@@ -493,7 +500,6 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
       'indent',
       'link',
       'image',
-      // Removed 'uploadFile'
     ],
     [],
   );
