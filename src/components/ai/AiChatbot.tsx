@@ -5,7 +5,6 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/componen
 import { MessageCircle, Send, Loader2, Bot, User, ChevronDown, ChevronUp, BookOpen, PlusCircle, RefreshCw } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { supabase } from '@/integrations/supabase/client';
-import { useSession } from '@/integrations/supabase/SessionContextProvider';
 import { showError } from '@/utils/toast';
 import { cn } from '@/lib/utils';
 import {
@@ -232,6 +231,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
         if (done) break;
 
         const chunk = decoder.decode(value, { stream: true });
+        console.log('Raw chunk from Edge Function:', chunk); // Log raw chunk
         const lines = chunk.split('\n\n').filter(Boolean);
 
         for (const line of lines) {
@@ -241,6 +241,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
             
             try {
               const json = JSON.parse(data);
+              console.log('Parsed JSON from Edge Function:', json); // Log parsed JSON
               
               if (json.type === 'token') {
                 const content = json.content || '';
@@ -253,6 +254,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
                       : msg
                   )
                 );
+                console.log('Accumulated content:', accumulatedContent); // Log accumulated content
               } else if (json.type === 'sources') {
                 aiResponseSources = json.content || [];
                 if (json.chatSessionId) {
