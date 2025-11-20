@@ -26,7 +26,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ sidebar, mainContent,
       <ResizableHandle withHandle />
 
       {/* Center Content (Document Editor) */}
-      <ResizablePanel defaultSize={60} minSize={40}>
+      <ResizablePanel defaultSize={80} minSize={40}> {/* Adjusted defaultSize */}
         <main className="h-full p-4 overflow-y-auto">
           {mainContent}
         </main>
