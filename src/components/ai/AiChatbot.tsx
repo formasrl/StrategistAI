@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { MessageCircle, Send, Loader2, Bot, User, ChevronDown, ChevronUp, BookOpen, RefreshCw, Trash2 } from 'lucide-react';
+import { MessageCircle, Send, Loader2, Bot, User, ChevronDown, ChevronUp, BookOpen, PlusCircle, RefreshCw } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { supabase } from '@/integrations/supabase/client';
 import { useSession } from '@/integrations/supabase/SessionContextProvider';
@@ -50,25 +50,25 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [currentChatSessionId, setCurrentChatSessionId] = useState<string | undefined>(undefined);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const scrollAreaRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
-    // Use a small timeout to ensure DOM is updated before scrolling
-    setTimeout(() => {
-      if (messagesEndRef.current) {
-        messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      }
-    }, 100);
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
   };
 
   // Fetch chat history when context changes
   useEffect(() => {
+    let isMounted = true;
+
     const fetchHistory = async () => {
       if (!projectId) return;
       
-      setIsLoadingHistory(true);
-      setMessages([]);
-      setCurrentChatSessionId(undefined);
+      if (isMounted) {
+        setIsLoadingHistory(true);
+        setMessages([]);
+        setCurrentChatSessionId(undefined);
+      }
 
       try {
         // Build query to find the most recent relevant session
@@ -92,7 +92,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
 
         if (sessionError) {
           console.error('Error fetching chat session:', sessionError);
-        } else if (sessionData) {
+        } else if (sessionData && isMounted) {
           setCurrentChatSessionId(sessionData.id);
 
           // Fetch messages for this session
@@ -104,15 +104,12 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
 
           if (messagesError) {
             console.error('Error fetching messages:', messagesError);
-          } else if (messagesData) {
+          } else if (messagesData && isMounted) {
             const formattedMessages: ChatMessage[] = messagesData.map((msg) => ({
               id: msg.id,
               sender: msg.role === 'user' ? 'user' : 'ai',
-              text: msg.content,
+              text: msg.content || '', // Ensure text is never null
               timestamp: msg.created_at,
-              // Note: Sources are currently not stored in basic message table, 
-              // so historical messages won't show sources unless we expand schema.
-              // Keeping it simple for now.
             }));
             setMessages(formattedMessages);
           }
@@ -120,17 +117,23 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
       } catch (err) {
         console.error('Unexpected error loading history:', err);
       } finally {
-        setIsLoadingHistory(false);
+        if (isMounted) setIsLoadingHistory(false);
       }
     };
 
     fetchHistory();
+
+    return () => {
+      isMounted = false;
+    };
   }, [projectId, stepId, documentId]);
 
   // Scroll on new messages
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    // Small timeout to allow DOM to update
+    const timeoutId = setTimeout(scrollToBottom, 100);
+    return () => clearTimeout(timeoutId);
+  }, [messages, isSending]);
 
   const handleNewChat = () => {
     setMessages([]);
@@ -138,31 +141,44 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
     setInputMessage('');
   };
 
-  const renderMessageContent = useCallback((text: string) => {
-    const parts: React.ReactNode[] = [];
-    const regex = /\[([^\]]+)\]\(([^)]+)\)/g;
-    let lastIndex = 0;
-    let match;
+  // Robust message rendering to prevent crashes
+  const renderMessageContent = (text: string | undefined | null) => {
+    if (!text) return null;
+    
+    try {
+      const parts: React.ReactNode[] = [];
+      const regex = /\[([^\]]+)\]\(([^)]+)\)/g;
+      let lastIndex = 0;
+      let match;
 
-    while ((match = regex.exec(text)) !== null) {
-      const [fullMatch, linkText, linkPath] = match;
-      if (match.index > lastIndex) {
-        parts.push(text.substring(lastIndex, match.index));
+      // Limit iterations to prevent potential infinite loops with malformed regex
+      let loopCount = 0;
+      const MAX_LOOPS = 100;
+
+      while ((match = regex.exec(text)) !== null && loopCount < MAX_LOOPS) {
+        loopCount++;
+        const [fullMatch, linkText, linkPath] = match;
+        if (match.index > lastIndex) {
+          parts.push(text.substring(lastIndex, match.index));
+        }
+        parts.push(
+          <Link key={`${match.index}-${loopCount}`} to={linkPath} className="text-blue-400 hover:underline font-medium">
+            {linkText}
+          </Link>
+        );
+        lastIndex = regex.lastIndex;
       }
-      parts.push(
-        <Link key={match.index} to={linkPath} className="text-blue-400 hover:underline">
-          {linkText}
-        </Link>
-      );
-      lastIndex = regex.lastIndex;
-    }
 
-    if (lastIndex < text.length) {
-      parts.push(text.substring(lastIndex));
-    }
+      if (lastIndex < text.length) {
+        parts.push(text.substring(lastIndex));
+      }
 
-    return <>{parts}</>;
-  }, []);
+      return <>{parts}</>;
+    } catch (e) {
+      console.error("Error rendering message content:", e);
+      return <>{text}</>; // Fallback to raw text
+    }
+  };
 
   const sendToAiAssistant = async (userMessageText: string) => {
     if (!session?.access_token) {
@@ -170,8 +186,9 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
       return;
     }
 
+    const tempId = Date.now().toString();
     const aiPlaceholderMessage: ChatMessage = {
-      id: (Date.now() + 1).toString(),
+      id: tempId,
       sender: 'ai',
       text: '',
       timestamp: new Date().toISOString(),
@@ -200,7 +217,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
       );
 
       if (!response.ok || !response.body) {
-        const errorData = await response.json();
+        const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error || 'Failed to get AI response.');
       }
 
@@ -220,36 +237,44 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
         for (const line of lines) {
           if (line.startsWith('data: ')) {
             const data = line.substring(6);
+            if (data === '[DONE]') continue;
+            
             try {
               const json = JSON.parse(data);
+              
               if (json.type === 'token') {
-                accumulatedContent += json.content;
+                const content = json.content || '';
+                accumulatedContent += content;
+                
                 setMessages((prev) =>
                   prev.map((msg) =>
-                    msg.id === aiPlaceholderMessage.id
+                    msg.id === tempId
                       ? { ...msg, text: accumulatedContent }
-                      : msg,
-                  ),
+                      : msg
+                  )
                 );
               } else if (json.type === 'sources') {
-                aiResponseSources = json.content;
-                newChatSessionId = json.chatSessionId;
+                aiResponseSources = json.content || [];
+                if (json.chatSessionId) {
+                  newChatSessionId = json.chatSessionId;
+                }
+                
                 setMessages((prev) =>
                   prev.map((msg) =>
-                    msg.id === aiPlaceholderMessage.id
+                    msg.id === tempId
                       ? { ...msg, sources: aiResponseSources }
-                      : msg,
-                  ),
+                      : msg
+                  )
                 );
               } else if (json.type === 'error') {
-                showError(`AI Chatbot error: ${json.content}`);
-                accumulatedContent += `\n\nError: ${json.content}`;
+                console.error("AI Stream Error:", json.content);
+                accumulatedContent += `\n\n*[Error: ${json.content}]*`;
                 setMessages((prev) =>
                   prev.map((msg) =>
-                    msg.id === aiPlaceholderMessage.id
+                    msg.id === tempId
                       ? { ...msg, text: accumulatedContent }
-                      : msg,
-                  ),
+                      : msg
+                  )
                 );
               }
             } catch (e) {
@@ -258,18 +283,20 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
           }
         }
       }
-      setCurrentChatSessionId(newChatSessionId);
+      
+      if (newChatSessionId) {
+        setCurrentChatSessionId(newChatSessionId);
+      }
+      
     } catch (err: any) {
       console.error('Error invoking chat-ai-assistant:', err);
-      showError(`An unexpected error occurred: ${err.message}`);
+      showError(`AI Error: ${err.message}`);
       setMessages((prev) =>
         prev.map((msg) =>
-          msg.id === aiPlaceholderMessage.id
+          msg.id === tempId
             ? {
                 ...msg,
-                text:
-                  accumulatedContent ||
-                  'Sorry, I encountered an unexpected error. Please try again later.',
+                text: msg.text + `\n\nSorry, I encountered an error. Please try again.`,
               }
             : msg,
         ),
@@ -278,12 +305,12 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
   };
 
   const handleProjectLevelChat = async (query: string) => {
-    const aiResponseId = (Date.now() + 1).toString();
+    const aiResponseId = Date.now().toString();
     let aiResponseText = "I noticed you're asking a question without a specific document or step selected. Selecting a document gives better answers as it provides more context for me to assist you effectively.";
 
     const { data: allSteps, error: stepsError } = await supabase
       .from('steps')
-      .select('id, step_name, description, phase_id')
+      .select('id, step_name, description')
       .eq('project_id', projectId);
 
     if (stepsError) {
@@ -292,8 +319,8 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
     } else if (allSteps && allSteps.length > 0) {
       const lowerCaseQuery = query.toLowerCase();
       const suggestedSteps = allSteps.filter(step =>
-        step.step_name?.toLowerCase().includes(lowerCaseQuery) ||
-        step.description?.toLowerCase().includes(lowerCaseQuery)
+        (step.step_name?.toLowerCase() || '').includes(lowerCaseQuery) ||
+        (step.description?.toLowerCase() || '').includes(lowerCaseQuery)
       ).slice(0, 3);
 
       if (suggestedSteps.length > 0) {
@@ -338,12 +365,17 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
     setInputMessage('');
     setIsSending(true);
 
-    if (!stepId && !documentId) {
-      await handleProjectLevelChat(userMessageText);
-    } else {
-      await sendToAiAssistant(userMessageText);
+    try {
+      if (!stepId && !documentId) {
+        await handleProjectLevelChat(userMessageText);
+      } else {
+        await sendToAiAssistant(userMessageText);
+      }
+    } catch (error) {
+      console.error("Error sending message:", error);
+    } finally {
+      setIsSending(false);
     }
-    setIsSending(false);
   };
 
   const getContextTitle = () => {
@@ -362,7 +394,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
         <CollapsibleTrigger asChild>
           <button
             type="button"
-            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
           >
             <BookOpen className="h-3 w-3" />
             Sources
@@ -379,7 +411,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
               <div className="font-semibold text-foreground">
                 {source.document_name || 'Untitled Document'}
               </div>
-              <div className="text-muted-foreground mt-1">
+              <div className="text-muted-foreground mt-1 line-clamp-3">
                 {source.chunk_preview}
               </div>
               <div className="mt-1 text-[10px] text-muted-foreground/80">
@@ -394,7 +426,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
 
   return (
     <Card className="flex flex-col h-full border-none shadow-none bg-transparent">
-      <CardHeader className="p-4 pb-2 border-b border-border flex flex-row items-center justify-between space-y-0">
+      <CardHeader className="p-4 pb-2 border-b border-border flex flex-row items-center justify-between space-y-0 shrink-0">
         <CardTitle className="text-lg font-semibold flex items-center gap-2">
           <MessageCircle className="h-5 w-5 text-blue-500" />
           <span className="truncate max-w-[150px] sm:max-w-md">{getContextTitle()}</span>
@@ -402,7 +434,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" onClick={handleNewChat} className="h-8 w-8">
+              <Button variant="ghost" size="icon" onClick={handleNewChat} className="h-8 w-8" title="Start New Chat">
                 <RefreshCw className="h-4 w-4 text-muted-foreground hover:text-foreground" />
                 <span className="sr-only">New Chat</span>
               </Button>
@@ -415,15 +447,17 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
       </CardHeader>
       <CardContent className="flex-1 p-0 overflow-hidden relative">
         <ScrollArea className="h-full p-4">
-          <div className="space-y-4 pb-4">
+          <div className="space-y-4 pb-4 min-h-[200px]">
             {isLoadingHistory && (
                <div className="flex justify-center py-4">
                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                </div>
             )}
             {!isLoadingHistory && messages.length === 0 && (
-              <div className="text-center text-muted-foreground italic py-4">
-                Start a conversation with your AI Brand Strategist!
+              <div className="text-center text-muted-foreground italic py-8 px-4">
+                <Bot className="h-12 w-12 mx-auto mb-2 text-muted-foreground/50" />
+                <p>Start a conversation with your AI Brand Strategist!</p>
+                <p className="text-xs mt-2">I can help you brainstorm, critique your work, or answer questions about this specific context.</p>
               </div>
             )}
             {messages.map((msg) => (
@@ -435,18 +469,20 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
                 )}
               >
                 {msg.sender === 'ai' && (
-                  <Bot className="h-6 w-6 text-blue-500 flex-shrink-0 mt-1" />
+                  <Bot className="h-8 w-8 p-1.5 bg-blue-100 text-blue-600 dark:bg-blue-900 dark:text-blue-200 rounded-full flex-shrink-0 mt-1" />
                 )}
                 <div
                   className={cn(
-                    'max-w-[85%] p-3 rounded-lg',
+                    'max-w-[85%] p-3 rounded-lg shadow-sm',
                     msg.sender === 'user'
                       ? 'bg-primary text-primary-foreground rounded-br-none'
-                      : 'bg-muted text-muted-foreground rounded-bl-none',
+                      : 'bg-muted text-muted-foreground rounded-bl-none border border-border',
                   )}
                 >
-                  <p className="text-sm whitespace-pre-wrap break-words">{renderMessageContent(msg.text)}</p>
-                  <span className="block text-xs opacity-70 mt-1">
+                  <div className="text-sm whitespace-pre-wrap break-words leading-relaxed">
+                    {renderMessageContent(msg.text)}
+                  </div>
+                  <span className="block text-[10px] opacity-70 mt-1 text-right">
                     {new Date(msg.timestamp).toLocaleTimeString([], {
                       hour: '2-digit',
                       minute: '2-digit',
@@ -455,24 +491,26 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
                   {msg.sender === 'ai' && renderSources(msg.sources)}
                 </div>
                 {msg.sender === 'user' && (
-                  <User className="h-6 w-6 text-gray-500 flex-shrink-0 mt-1" />
+                  <User className="h-8 w-8 p-1.5 bg-gray-200 text-gray-600 dark:bg-gray-800 dark:text-gray-300 rounded-full flex-shrink-0 mt-1" />
                 )}
               </div>
             ))}
             {isSending && (
-              <div className="flex items-start gap-3 justify-start">
-                <Bot className="h-6 w-6 text-blue-500 flex-shrink-0 mt-1" />
-                <div className="max-w-[85%] p-3 rounded-lg bg-muted text-muted-foreground rounded-bl-none">
-                  <Loader2 className="h-4 w-4 animate-spin inline-block mr-2" />
-                  <span className="text-sm">AI is thinking...</span>
+              <div className="flex items-start gap-3 justify-start animate-pulse">
+                <Bot className="h-8 w-8 p-1.5 bg-blue-100 text-blue-600 dark:bg-blue-900 dark:text-blue-200 rounded-full flex-shrink-0 mt-1" />
+                <div className="max-w-[85%] p-3 rounded-lg bg-muted text-muted-foreground rounded-bl-none border border-border">
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    <span className="text-xs">StrategistAI is thinking...</span>
+                  </div>
                 </div>
               </div>
             )}
-            <div ref={messagesEndRef} className="h-1" />
+            <div ref={messagesEndRef} className="h-1 w-full" />
           </div>
         </ScrollArea>
       </CardContent>
-      <CardFooter className="p-4 pt-2 border-t border-border bg-background z-10">
+      <CardFooter className="p-4 pt-2 border-t border-border bg-background z-10 shrink-0">
         <form onSubmit={handleSendMessage} className="flex w-full space-x-2">
           <Input
             id="tour-ai-chat-input"
