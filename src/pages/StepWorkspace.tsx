@@ -8,7 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Lightbulb, Loader2 } from 'lucide-react';
 import DocumentEditor from './DocumentEditor';
-import { stepGuidanceLibrary } from '@/utils/stepGuidanceData';
+import { stepGuidanceLibrary, StepGuidance } from '@/utils/stepGuidanceData';
 
 interface StepWorkspaceOutletContext {
   setAiReview: (review: AiReview | null) => void;
@@ -137,7 +137,8 @@ const StepWorkspace: React.FC = () => {
     );
   }
 
-  const guidance = stepGuidanceLibrary[step.step_name];
+  // Look up guidance based on the step name
+  const staticGuidance: StepGuidance | undefined = stepGuidanceLibrary[step.step_name];
 
   return (
     <div className="flex flex-col h-full space-y-4">
@@ -147,33 +148,41 @@ const StepWorkspace: React.FC = () => {
           <CardTitle className="text-xl font-bold">Guidance: {step.step_name}</CardTitle>
         </CardHeader>
         <CardContent className="p-4 pt-0 text-sm text-muted-foreground space-y-4">
+          
+          {/* Description */}
           <div>
             <h3 className="font-semibold text-foreground">What this step is about:</h3>
-            <p>{guidance?.description || step.description || "No description available."}</p>
+            <p>{staticGuidance?.description || step.description || "No description available."}</p>
           </div>
           
+          {/* Why it Matters */}
           <div>
             <h3 className="font-semibold text-foreground">Why it matters:</h3>
-            <p>{guidance?.why_matters || step.why_matters || "No context available."}</p>
+            <p>{staticGuidance?.why_matters || step.why_matters || "No context available."}</p>
           </div>
           
-          {guidance?.guiding_questions && guidance.guiding_questions.length > 0 && (
-            <div>
-              <h3 className="font-semibold text-foreground">Guiding Questions:</h3>
+          {/* Guiding Questions */}
+          <div>
+            <h3 className="font-semibold text-foreground">Guiding Questions:</h3>
+            {staticGuidance?.guiding_questions && staticGuidance.guiding_questions.length > 0 ? (
               <ul className="list-disc pl-5 space-y-1">
-                {guidance.guiding_questions.map((question, index) => (
+                {staticGuidance.guiding_questions.map((question, index) => (
                   <li key={index}>{question}</li>
                 ))}
               </ul>
-            </div>
-          )}
+            ) : (
+              <p>No specific guiding questions available for this step yet.</p>
+            )}
+          </div>
 
-          {guidance?.expected_output && (
-            <div>
-              <h3 className="font-semibold text-foreground">Expected Output:</h3>
-              <p className="font-medium text-primary">{guidance.expected_output}</p>
-            </div>
-          )}
+          {/* Expected Output */}
+          <div>
+            <h3 className="font-semibold text-foreground">Expected Output:</h3>
+            <p className="font-medium text-primary">
+              {staticGuidance?.expected_output || 
+               `A concise document outlining the key strategic decisions for "${step.step_name}".`}
+            </p>
+          </div>
         </CardContent>
       </Card>
 
