@@ -1,6 +1,7 @@
 import { toast } from "sonner";
 
-const generateId = () => Math.random().toString(36).substring(2, 9);
+// Use crypto.randomUUID() for truly unique IDs
+const generateId = () => crypto.randomUUID();
 
 export const showSuccess = (message: string) => {
   const toastId = generateId();
