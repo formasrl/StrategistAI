@@ -18,12 +18,12 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ sidebar, mainContent,
       className="h-screen w-full rounded-lg border bg-background text-foreground"
     >
       {/* Left Sidebar (Roadmap Navigation) */}
-      <ResizablePanel defaultSize={20} minSize={15} maxSize={30} className="hidden md:block">
+      <ResizablePanel defaultSize={0} minSize={15} maxSize={30}>
         <aside className="h-full p-4 bg-sidebar border-r border-border flex flex-col">
           {sidebar}
         </aside>
       </ResizablePanel>
-      <ResizableHandle withHandle className="hidden md:flex" />
+      <ResizableHandle withHandle />
 
       {/* Center Content (Document Editor) */}
       <ResizablePanel defaultSize={60} minSize={40}>
