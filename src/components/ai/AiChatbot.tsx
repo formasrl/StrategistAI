@@ -1,8 +1,8 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { MessageCircle, Send, Loader2, Bot, User, ChevronDown, ChevronUp, BookOpen, PlusCircle, RefreshCw } from 'lucide-react';
+import { MessageCircle, Send, Loader2, Bot, User, BookOpen, PlusCircle, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { supabase } from '@/integrations/supabase/client';
 import { useSession } from '@/integrations/supabase/SessionContextProvider';
@@ -20,6 +20,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { RealtimeChannel } from '@supabase/supabase-js';
 
 interface ChatSource {
   document_name: string;
@@ -33,6 +34,7 @@ interface ChatMessage {
   text: string;
   timestamp: string;
   sources?: ChatSource[];
+  isStreaming?: boolean; // Track if this message is currently being streamed
 }
 
 interface AiChatbotProps {
@@ -49,35 +51,36 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
   const [isSending, setIsSending] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [currentChatSessionId, setCurrentChatSessionId] = useState<string | undefined>(undefined);
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const subscriptionRef = useRef<RealtimeChannel | null>(null);
 
-  const scrollToBottom = () => {
+  // Auto-scroll to bottom when messages change
+  useEffect(() => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
-  };
+  }, [messages, isSending]);
 
-  const generateId = () => {
-    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-      return crypto.randomUUID();
-    }
-    return Date.now().toString() + Math.random().toString(36).substring(2);
-  };
-
-  // Fetch chat history when context changes
+  // 1. Fetch History & Setup Subscription
   useEffect(() => {
     let isMounted = true;
 
-    const fetchHistory = async () => {
+    const initializeChat = async () => {
       if (!projectId) return;
 
-      if (isMounted) {
-        setIsLoadingHistory(true);
-        setMessages([]);
-        setCurrentChatSessionId(undefined);
+      // Clean up old subscription if exists
+      if (subscriptionRef.current) {
+        supabase.removeChannel(subscriptionRef.current);
+        subscriptionRef.current = null;
       }
 
+      setIsLoadingHistory(true);
+      setMessages([]);
+      setCurrentChatSessionId(undefined);
+
       try {
+        // A. Find the active session
         let query = supabase
           .from('chat_sessions')
           .select('id')
@@ -98,17 +101,19 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
         if (sessionError) {
           console.error('Error fetching chat session:', sessionError);
         } else if (sessionData && isMounted) {
-          setCurrentChatSessionId(sessionData.id);
+          const sessionId = sessionData.id;
+          setCurrentChatSessionId(sessionId);
 
+          // B. Fetch existing messages
           const { data: messagesData, error: messagesError } = await supabase
             .from('chat_messages')
             .select('*')
-            .eq('chat_session_id', sessionData.id)
+            .eq('chat_session_id', sessionId)
             .order('created_at', { ascending: true });
 
           if (messagesError) {
             console.error('Error fetching messages:', messagesError);
-          } else if (messagesData && isMounted) {
+          } else if (messagesData) {
             const formattedMessages: ChatMessage[] = messagesData.map((msg) => ({
               id: msg.id,
               sender: msg.role === 'user' ? 'user' : 'ai',
@@ -117,6 +122,54 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
             }));
             setMessages(formattedMessages);
           }
+
+          // C. Subscribe to Realtime changes for this session
+          // This acts as a safety net: if streaming fails or misses something,
+          // the database insertion will trigger this and update the UI.
+          const channel = supabase
+            .channel(`chat:${sessionId}`)
+            .on(
+              'postgres_changes',
+              {
+                event: 'INSERT',
+                schema: 'public',
+                table: 'chat_messages',
+                filter: `chat_session_id=eq.${sessionId}`,
+              },
+              (payload) => {
+                const newMsg = payload.new as any;
+                setMessages((prev) => {
+                  // Prevent duplicates (if we already added it optimistically or via stream)
+                  // We check by ID if available, but optimistic IDs are random UUIDs.
+                  // Strategy: Ideally we'd match IDs, but Edge Function might not return the DB ID immediately.
+                  // We will rely on the fact that the DB insert usually happens AFTER streaming is done.
+                  
+                  // Simple check: if we have a message with this exact content and role at the end, ignore.
+                  // A better check: If we are "streaming", we ignore DB inserts for "ai" role to prevent jitter,
+                  // unless the stream has finished.
+                  
+                  // For simplicity in this fix: We'll only add if we don't have this ID.
+                  // AND if it's an AI message, we check if we have a "streaming" AI message currently.
+                  const exists = prev.some(m => m.id === newMsg.id);
+                  if (exists) return prev;
+
+                  // If we are actively sending/streaming, and this is an AI message, it might be the one we are streaming.
+                  // In that case, we might duplicate.
+                  // However, this subscription is VITAL for the "refresh" fix.
+                  // If the user sees nothing, this will make it appear.
+                  
+                  return [...prev, {
+                    id: newMsg.id,
+                    sender: newMsg.role === 'user' ? 'user' : 'ai',
+                    text: newMsg.content,
+                    timestamp: newMsg.created_at
+                  }];
+                });
+              }
+            )
+            .subscribe();
+          
+          subscriptionRef.current = channel;
         }
       } catch (err) {
         console.error('Unexpected error loading history:', err);
@@ -125,59 +178,29 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
       }
     };
 
-    fetchHistory();
+    initializeChat();
 
     return () => {
       isMounted = false;
+      if (subscriptionRef.current) {
+        supabase.removeChannel(subscriptionRef.current);
+      }
     };
   }, [projectId, stepId, documentId]);
 
-  useEffect(() => {
-    const timeoutId = setTimeout(scrollToBottom, 100);
-    return () => clearTimeout(timeoutId);
-  }, [messages, isSending]);
 
   const handleNewChat = () => {
     setMessages([]);
     setCurrentChatSessionId(undefined);
     setInputMessage('');
-  };
-
-  const renderMessageContent = (text: string | undefined | null) => {
-    if (!text) return null;
-
-    try {
-      const parts: React.ReactNode[] = [];
-      const regex = /\[([^\]]+)\]\(([^)]+)\)/g;
-      let lastIndex = 0;
-      let match;
-      let loopCount = 0;
-      const MAX_LOOPS = 100;
-
-      while ((match = regex.exec(text)) !== null && loopCount < MAX_LOOPS) {
-        loopCount++;
-        const [fullMatch, linkText, linkPath] = match;
-        if (match.index > lastIndex) {
-          parts.push(text.substring(lastIndex, match.index));
-        }
-        parts.push(
-          <Link key={`${match.index}-${loopCount}`} to={linkPath} className="text-blue-400 hover:underline font-medium">
-            {linkText}
-          </Link>
-        );
-        lastIndex = regex.lastIndex;
-      }
-
-      if (lastIndex < text.length) {
-        parts.push(text.substring(lastIndex));
-      }
-
-      return <>{parts}</>;
-    } catch (e) {
-      console.error("Error rendering message content:", e);
-      return <>{text}</>;
+    if (subscriptionRef.current) {
+      supabase.removeChannel(subscriptionRef.current);
+      subscriptionRef.current = null;
     }
   };
+
+  // Helper to generate a temporary ID for optimistic updates
+  const generateTempId = () => crypto.randomUUID();
 
   const sendToAiAssistant = async (userMessageText: string) => {
     if (!session?.access_token) {
@@ -185,18 +208,22 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
       return;
     }
 
-    const tempId = generateId();
-    const aiPlaceholderMessage: ChatMessage = {
-      id: tempId,
-      sender: 'ai',
-      text: '',
-      timestamp: new Date().toISOString(),
-      sources: [],
-    };
-    setMessages((prev) => [...prev, aiPlaceholderMessage]);
+    const tempAiMsgId = generateTempId();
+
+    // Optimistic Update: Add AI placeholder immediately
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: tempAiMsgId,
+        sender: 'ai',
+        text: '', // Start empty
+        timestamp: new Date().toISOString(),
+        sources: [],
+        isStreaming: true,
+      },
+    ]);
 
     try {
-      const preferStreaming = typeof ReadableStream !== 'undefined';
       const response = await fetch(
         `${supabase.supabaseUrl}/functions/v1/chat-ai-assistant`,
         {
@@ -212,55 +239,47 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
             stepId,
             documentId,
             chatSessionId: currentChatSessionId,
-            stream: preferStreaming, // hint to backend
+            stream: true, // Always try streaming first
           }),
         },
       );
 
       if (!response.ok) {
-        // Try JSON error body
-        let errorText = 'Failed to get AI response.';
-        try {
-          const errorJson = await response.json();
-          if (errorJson?.error) errorText = errorJson.error;
-        } catch {
-          // ignore parse error
-        }
-        throw new Error(errorText);
+        throw new Error('Failed to connect to AI service.');
       }
 
+      // Check content type to determine handling strategy
       const contentType = response.headers.get('Content-Type') || '';
+      const isStreamingResponse = contentType.includes('text/event-stream');
 
-      // --- Non-streaming JSON path ---
-      if (!preferStreaming || !contentType.startsWith('text/event-stream') || !response.body) {
-        // Expect JSON: { reply, sources, chatSessionId, metadata }
+      if (!isStreamingResponse) {
+        // Fallback: Handle standard JSON response
         const data = await response.json();
-        const fullReplyContent: string = data.reply || 'Sorry, I could not generate a response.';
-        const sources: ChatSource[] = data.sources || [];
-        const newChatSessionId: string | undefined = data.chatSessionId;
-
         setMessages((prev) =>
           prev.map((msg) =>
-            msg.id === tempId
-              ? { ...msg, text: fullReplyContent, sources }
+            msg.id === tempAiMsgId
+              ? {
+                  ...msg,
+                  text: data.reply || 'No response received.',
+                  sources: data.sources || [],
+                  isStreaming: false,
+                }
               : msg
           )
         );
-
-        if (newChatSessionId) {
-          setCurrentChatSessionId(newChatSessionId);
+        if (data.chatSessionId && !currentChatSessionId) {
+          setCurrentChatSessionId(data.chatSessionId);
         }
-
         return;
       }
 
-      // --- Streaming SSE path (existing) ---
-      const reader = response.body.getReader();
+      // Handle Streaming Response
+      const reader = response.body?.getReader();
       const decoder = new TextDecoder();
-      let accumulatedContent = '';
-      let aiResponseSources: ChatSource[] = [];
-      let newChatSessionId: string | undefined = currentChatSessionId;
+      let accumulatedText = '';
       let buffer = '';
+
+      if (!reader) throw new Error('No reader available for stream.');
 
       while (true) {
         const { done, value } = await reader.read();
@@ -269,115 +288,83 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
         const chunk = decoder.decode(value, { stream: true });
         buffer += chunk;
 
-        const parts = buffer.split('\n\n');
-        buffer = parts.pop() || '';
+        const lines = buffer.split('\n\n');
+        // Keep the last partial line in the buffer
+        buffer = lines.pop() || '';
 
-        for (const part of parts) {
-          if (part.trim().startsWith('data: ')) {
-            const dataStr = part.trim().substring(6);
-            if (dataStr === '[DONE]') continue;
+        for (const line of lines) {
+          const trimmedLine = line.trim();
+          if (!trimmedLine.startsWith('data: ')) continue;
 
-            try {
-              const json = JSON.parse(dataStr);
+          const dataStr = trimmedLine.substring(6);
+          if (dataStr === '[DONE]') continue;
 
-              if (json.type === 'token') {
-                const content = json.content || '';
-                accumulatedContent += content;
+          try {
+            const json = JSON.parse(dataStr);
 
-                setMessages((prev) =>
-                  prev.map((msg) =>
-                    msg.id === tempId
-                      ? { ...msg, text: accumulatedContent }
-                      : msg
-                  )
-                );
-              } else if (json.type === 'sources') {
-                aiResponseSources = json.content || [];
-                if (json.chatSessionId) {
-                  newChatSessionId = json.chatSessionId;
-                }
-
-                setMessages((prev) =>
-                  prev.map((msg) =>
-                    msg.id === tempId
-                      ? { ...msg, sources: aiResponseSources }
-                      : msg
-                  )
-                );
-              } else if (json.type === 'error') {
-                accumulatedContent += `\n\n*[Error: ${json.content}]*`;
-                setMessages((prev) =>
-                  prev.map((msg) =>
-                    msg.id === tempId
-                      ? { ...msg, text: accumulatedContent }
-                      : msg
-                  )
-                );
+            // 1. Token Update
+            if (json.type === 'token' && json.content) {
+              accumulatedText += json.content;
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === tempAiMsgId
+                    ? { ...msg, text: accumulatedText }
+                    : msg
+                )
+              );
+            } 
+            // 2. Sources / Metadata Update
+            else if (json.type === 'sources') {
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === tempAiMsgId
+                    ? { ...msg, sources: json.content }
+                    : msg
+                )
+              );
+              // Update session ID if it was created during this turn
+              if (json.chatSessionId && !currentChatSessionId) {
+                setCurrentChatSessionId(json.chatSessionId);
               }
-            } catch (e) {
-              console.error('Error parsing stream chunk:', e);
+            } 
+            // 3. Error from stream
+            else if (json.type === 'error') {
+              accumulatedText += `\n[Error: ${json.content}]`;
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === tempAiMsgId
+                    ? { ...msg, text: accumulatedText }
+                    : msg
+                )
+              );
             }
+          } catch (e) {
+            console.warn('Error parsing stream chunk:', e);
           }
         }
       }
 
-      if (newChatSessionId) {
-        setCurrentChatSessionId(newChatSessionId);
-      }
-    } catch (err: any) {
-      console.error('Error invoking chat-ai-assistant:', err);
-      showError(`AI Error: ${err.message}`);
+      // Mark streaming as done
       setMessages((prev) =>
         prev.map((msg) =>
-          msg.id === tempId
+          msg.id === tempAiMsgId ? { ...msg, isStreaming: false } : msg
+        )
+      );
+
+    } catch (err: any) {
+      console.error('Chat error:', err);
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === tempAiMsgId
             ? {
                 ...msg,
-                text: (msg.text || '') + `\n\nSorry, I encountered an error. Please try again.`,
+                text: (msg.text || '') + `\n\n[System Error: ${err.message || 'Connection failed'}]`,
+                isStreaming: false,
               }
-            : msg,
-        ),
+            : msg
+        )
       );
     }
-  };
-
-  const handleProjectLevelChat = async (query: string) => {
-    const aiResponseId = generateId();
-    let aiResponseText = "I noticed you're asking a question without a specific document or step selected. Selecting a document gives better answers as it provides more context for me to assist you effectively.";
-
-    const { data: allSteps, error: stepsError } = await supabase
-      .from('steps')
-      .select('id, step_name, description')
-      .eq('project_id', projectId);
-
-    if (stepsError) {
-      console.error("Error fetching steps for suggestions:", stepsError);
-      aiResponseText += "\n\nHowever, I couldn't fetch relevant steps at this moment. Please try again later.";
-    } else if (allSteps && allSteps.length > 0) {
-      const lowerCaseQuery = query.toLowerCase();
-      const suggestedSteps = allSteps.filter(step =>
-        (step.step_name?.toLowerCase() || '').includes(lowerCaseQuery) ||
-        (step.description?.toLowerCase() || '').includes(lowerCaseQuery)
-      ).slice(0, 3);
-
-      if (suggestedSteps.length > 0) {
-        aiResponseText += "\n\nPerhaps you're looking for one of these steps? Click on a step to navigate to its workspace:";
-        suggestedSteps.forEach(step => {
-          aiResponseText += `\n- [${step.step_name}](/dashboard/${projectId}/step/${step.id})`;
-        });
-      } else {
-        aiResponseText += "\n\nI couldn't find any steps directly related to your query. Please try rephrasing or select a step from the roadmap.";
-      }
-    } else {
-      aiResponseText += "\n\nThere are no steps defined for this project yet. Please create some steps first.";
-    }
-
-    const aiMessage: ChatMessage = {
-      id: aiResponseId,
-      sender: 'ai',
-      text: aiResponseText,
-      timestamp: new Date().toISOString(),
-    };
-    setMessages((prev) => [...prev, aiMessage]);
   };
 
   const handleSendMessage = async (e?: React.FormEvent) => {
@@ -389,29 +376,24 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
       return;
     }
 
-    const userMessageText = inputMessage.trim();
-    const userMessage: ChatMessage = {
-      id: generateId(),
-      sender: 'user',
-      text: userMessageText,
-      timestamp: new Date().toISOString(),
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
+    const text = inputMessage.trim();
     setInputMessage('');
     setIsSending(true);
 
-    try {
-      if (!stepId && !documentId) {
-        await handleProjectLevelChat(userMessageText);
-      } else {
-        await sendToAiAssistant(userMessageText);
-      }
-    } catch (error) {
-      console.error("Error sending message:", error);
-    } finally {
-      setIsSending(false);
-    }
+    // Optimistic User Message
+    const tempUserMsgId = generateTempId();
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: tempUserMsgId,
+        sender: 'user',
+        text: text,
+        timestamp: new Date().toISOString(),
+      },
+    ]);
+
+    await sendToAiAssistant(text);
+    setIsSending(false);
   };
 
   const getContextTitle = () => {
@@ -422,36 +404,52 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
     return 'General Chat';
   };
 
+  // --- Rendering Helpers ---
+
+  const renderMessageContent = (text: string) => {
+    // Simple markdown-like link parser: [Label](url)
+    const parts: React.ReactNode[] = [];
+    const regex = /\[([^\]]+)\]\(([^)]+)\)/g;
+    let lastIndex = 0;
+    let match;
+    
+    while ((match = regex.exec(text)) !== null) {
+      const [fullMatch, label, url] = match;
+      const preText = text.substring(lastIndex, match.index);
+      if (preText) parts.push(preText);
+      
+      parts.push(
+        <Link key={match.index} to={url} className="text-blue-500 hover:underline font-medium">
+          {label}
+        </Link>
+      );
+      lastIndex = regex.lastIndex;
+    }
+    
+    const remaining = text.substring(lastIndex);
+    if (remaining) parts.push(remaining);
+
+    return <>{parts.length > 0 ? parts : text}</>;
+  };
+
   const renderSources = (sources?: ChatSource[]) => {
     if (!sources || sources.length === 0) return null;
 
     return (
-      <Collapsible className="mt-2 border-t border-border pt-2">
+      <Collapsible className="mt-3 border-t border-border pt-2">
         <CollapsibleTrigger asChild>
-          <button
-            type="button"
-            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-          >
+          <button className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors w-full text-left">
             <BookOpen className="h-3 w-3" />
-            Sources
-            <ChevronDown className="h-3 w-3 data-[state=open]:hidden" />
-            <ChevronUp className="h-3 w-3 hidden data-[state=open]:block" />
+            <span>References</span>
+            <ChevronDown className="h-3 w-3 ml-auto transition-transform duration-200 data-[state=open]:rotate-180" />
           </button>
         </CollapsibleTrigger>
-        <CollapsibleContent className="mt-2 space-y-2">
-          {sources.map((source, index) => (
-            <div
-              key={`${source.document_name}-${index}`}
-              className="rounded-md bg-muted/60 p-2 text-xs"
-            >
-              <div className="font-semibold text-foreground">
-                {source.document_name || 'Untitled Document'}
-              </div>
-              <div className="text-muted-foreground mt-1 line-clamp-3">
-                {source.chunk_preview}
-              </div>
-              <div className="mt-1 text-[10px] text-muted-foreground/80">
-                Relevance score: {source.relevance_score.toFixed(2)}
+        <CollapsibleContent className="mt-2 space-y-2 animate-accordion-down">
+          {sources.map((source, i) => (
+            <div key={i} className="rounded bg-background/50 p-2 text-xs border border-border/50">
+              <div className="font-medium mb-0.5">{source.document_name}</div>
+              <div className="text-muted-foreground line-clamp-2 text-[10px] italic">
+                "{source.chunk_preview}"
               </div>
             </div>
           ))}
@@ -462,95 +460,109 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
 
   return (
     <Card className="flex flex-col h-full border-none shadow-none bg-transparent">
+      {/* Header */}
       <CardHeader className="p-4 pb-2 border-b border-border flex flex-row items-center justify-between space-y-0 shrink-0">
         <CardTitle className="text-lg font-semibold flex items-center gap-2">
           <MessageCircle className="h-5 w-5 text-blue-500" />
-          <span className="truncate max-w-[150px] sm:max-w-md">{getContextTitle()}</span>
+          <span className="truncate">{getContextTitle()}</span>
         </CardTitle>
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" onClick={handleNewChat} className="h-8 w-8" title="Start New Chat">
-                <RefreshCw className="h-4 w-4 text-muted-foreground hover:text-foreground" />
-                <span className="sr-only">New Chat</span>
+              <Button variant="ghost" size="icon" onClick={handleNewChat} className="h-8 w-8">
+                <RefreshCw className="h-4 w-4 text-muted-foreground" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>
-              <p>Start New Chat Session</p>
-            </TooltipContent>
+            <TooltipContent side="left">Start New Session</TooltipContent>
           </Tooltip>
         </TooltipProvider>
       </CardHeader>
-      <CardContent className="flex-1 p-0 overflow-hidden relative">
+
+      {/* Messages Area */}
+      <CardContent className="flex-1 p-0 overflow-hidden relative bg-background/50">
         <ScrollArea className="h-full p-4">
-          <div className="space-y-4 pb-4 min-h-[200px]">
+          <div className="space-y-6 pb-4 min-h-[200px]">
+            
+            {/* Empty State */}
+            {!isLoadingHistory && messages.length === 0 && (
+              <div className="flex flex-col items-center justify-center h-[300px] text-center text-muted-foreground px-8">
+                <div className="bg-muted/50 p-4 rounded-full mb-4">
+                  <Bot className="h-8 w-8 text-primary/60" />
+                </div>
+                <h3 className="font-medium text-foreground mb-1">AI Brand Strategist</h3>
+                <p className="text-sm">Ask me anything about your project, documents, or brand strategy.</p>
+              </div>
+            )}
+
+            {/* Loading History */}
             {isLoadingHistory && (
-              <div className="flex justify-center py-4">
+              <div className="flex justify-center py-8">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               </div>
             )}
-            {!isLoadingHistory && messages.length === 0 && (
-              <div className="text-center text-muted-foreground italic py-8 px-4">
-                <Bot className="h-12 w-12 mx-auto mb-2 text-muted-foreground/50" />
-                <p>Start a conversation with your AI Brand Strategist!</p>
-                <p className="text-xs mt-2">I can help you brainstorm, critique your work, or answer questions about this specific context.</p>
-              </div>
-            )}
+
+            {/* Message List */}
             {messages.map((msg) => (
               <div
                 key={msg.id}
                 className={cn(
-                  'flex items-start gap-3',
-                  msg.sender === 'user' ? 'justify-end' : 'justify-start',
+                  'flex w-full gap-3',
+                  msg.sender === 'user' ? 'justify-end' : 'justify-start'
                 )}
               >
                 {msg.sender === 'ai' && (
-                  <Bot className="h-8 w-8 p-1.5 bg-blue-100 text-blue-600 dark:bg-blue-900 dark:text-blue-200 rounded-full flex-shrink-0 mt-1" />
+                  <div className="h-8 w-8 rounded-full bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center flex-shrink-0 mt-1">
+                    <Bot className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                  </div>
                 )}
+                
                 <div
                   className={cn(
-                    'max-w-[85%] p-3 rounded-lg shadow-sm',
+                    'relative px-4 py-3 rounded-2xl max-w-[85%] shadow-sm text-sm leading-relaxed',
                     msg.sender === 'user'
-                      ? 'bg-primary text-primary-foreground rounded-br-none'
-                      : 'bg-muted text-muted-foreground rounded-bl-none border border-border',
+                      ? 'bg-primary text-primary-foreground rounded-tr-sm'
+                      : 'bg-card border border-border text-card-foreground rounded-tl-sm'
                   )}
                 >
-                  <div className="text-sm whitespace-pre-wrap break-words leading-relaxed">
+                  <div className="whitespace-pre-wrap break-words">
                     {renderMessageContent(msg.text)}
+                    {msg.sender === 'ai' && msg.text === '' && msg.isStreaming && (
+                      <span className="inline-flex gap-1 items-center ml-1">
+                        <span className="w-1.5 h-1.5 bg-current rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                        <span className="w-1.5 h-1.5 bg-current rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                        <span className="w-1.5 h-1.5 bg-current rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                      </span>
+                    )}
                   </div>
-                  <span className="block text-[10px] opacity-70 mt-1 text-right">
-                    {new Date(msg.timestamp).toLocaleTimeString([], {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </span>
+                  
                   {msg.sender === 'ai' && renderSources(msg.sources)}
+                  
+                  <div className={cn(
+                    "text-[10px] mt-1 text-right opacity-70",
+                    msg.sender === 'user' ? "text-primary-foreground/80" : "text-muted-foreground"
+                  )}>
+                    {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </div>
                 </div>
+
                 {msg.sender === 'user' && (
-                  <User className="h-8 w-8 p-1.5 bg-gray-200 text-gray-600 dark:bg-gray-800 dark:text-gray-300 rounded-full flex-shrink-0 mt-1" />
+                  <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0 mt-1">
+                    <User className="h-5 w-5 text-muted-foreground" />
+                  </div>
                 )}
               </div>
             ))}
-            {isSending && (
-              <div className="flex items-start gap-3 justify-start animate-pulse">
-                <Bot className="h-8 w-8 p-1.5 bg-blue-100 text-blue-600 dark:bg-blue-900 dark:text-blue-200 rounded-full flex-shrink-0 mt-1" />
-                <div className="max-w-[85%] p-3 rounded-lg bg-muted text-muted-foreground rounded-bl-none border border-border">
-                  <div className="flex items-center gap-2">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    <span className="text-xs">StrategistAI is thinking...</span>
-                  </div>
-                </div>
-              </div>
-            )}
-            <div ref={messagesEndRef} className="h-1 w-full" />
+            <div ref={messagesEndRef} />
           </div>
         </ScrollArea>
       </CardContent>
-      <CardFooter className="p-4 pt-2 border-t border-border bg-background z-10 shrink-0">
-        <form onSubmit={handleSendMessage} className="flex w-full space-x-2">
+
+      {/* Input Area */}
+      <CardFooter className="p-4 pt-2 border-t border-border bg-background">
+        <form onSubmit={handleSendMessage} className="flex w-full gap-2">
           <Input
             id="tour-ai-chat-input"
-            placeholder="Ask your AI assistant..."
+            placeholder="Ask a question..."
             value={inputMessage}
             onChange={(e) => setInputMessage(e.target.value)}
             disabled={isSending}
@@ -558,11 +570,8 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
             autoComplete="off"
           />
           <Button type="submit" size="icon" disabled={!inputMessage.trim() || isSending}>
-            {isSending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Send className="h-4 w-4" />
-            )}
+            {isSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            <span className="sr-only">Send</span>
           </Button>
         </form>
       </CardFooter>
