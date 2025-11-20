@@ -107,12 +107,14 @@ serve(async (req) => {
       stepId,
       documentId,
       chatSessionId: incomingChatSessionId,
+      stream = true,
     }: {
       message?: string;
       projectId?: string;
       stepId?: string;
       documentId?: string;
       chatSessionId?: string;
+      stream?: boolean;
     } = body ?? {};
 
     if (!message || !projectId) {
@@ -121,7 +123,7 @@ serve(async (req) => {
 
     // Relaxed validation: we need EITHER stepId OR documentId (from which we can derive stepId)
     if (!stepId && !documentId) {
-       return respond({ error: "Either stepId or documentId is required." }, 400);
+      return respond({ error: "Either stepId or documentId is required." }, 400);
     }
 
     const supabaseClient = createClient(
@@ -131,7 +133,6 @@ serve(async (req) => {
     );
 
     let effectiveStepId = stepId;
-
     let currentChatSessionId = incomingChatSessionId;
 
     if (!currentChatSessionId) {
@@ -190,13 +191,12 @@ serve(async (req) => {
       if (documentDetails.project_id !== projectId) {
         return respond({ error: "Document does not belong to the provided project." }, 403);
       }
-      
+
       // Derive stepId from document if missing
       if (!effectiveStepId) {
         effectiveStepId = documentDetails.step_id;
       } else if (documentDetails.step_id !== effectiveStepId) {
-         // Warn but don't fail? Or strictly enforce? Enforcing for now.
-         return respond({ error: "Document does not belong to the provided step." }, 403);
+        return respond({ error: "Document does not belong to the provided step." }, 403);
       }
 
       currentDocumentContextText = buildDocumentContextString(
@@ -213,7 +213,7 @@ serve(async (req) => {
     }
 
     if (!effectiveStepId) {
-       return respond({ error: "Could not determine active step context." }, 400);
+      return respond({ error: "Could not determine active step context." }, 400);
     }
 
     // Layer 3: Semantic Retrieval (search_document_embeddings)
@@ -240,7 +240,7 @@ serve(async (req) => {
       {
         input_project_id: projectId,
         query_embedding: queryEmbedding,
-        top_k: 7, // Increased from 3 to 7 for multi-document retrieval
+        top_k: 7,
       }
     );
 
@@ -251,11 +251,10 @@ serve(async (req) => {
     const semanticMatches = (semanticMatchesData || []) as SemanticMatch[];
     let formattedSemanticMemories = formatSemanticSearchResults(semanticMatches);
 
-    // Build sources array for response
     const sources = semanticMatches.map((match) => {
       const chunk = match.summary || "";
       const chunk_preview = chunk.length > 220 ? `${chunk.slice(0, 217)}...` : chunk;
-      const relevance_score = 1; // RPC doesn't return a distance; treat returned matches as high relevance
+      const relevance_score = 1;
       return {
         document_name: match.document_name,
         chunk_preview,
@@ -304,7 +303,7 @@ serve(async (req) => {
       "Focus on guidance, critique, and strategic alignment.",
       "Always respect previously published decisions and call out conflicts politely.",
       "If information is missing, ask clarifying questions instead of guessing.",
-      "Synthesize information from the 'RELEVANT SEMANTIC MEMORIES' section to provide comprehensive answers.", // New instruction for synthesis
+      "Synthesize information from the 'RELEVANT SEMANTIC MEMORIES' section to provide comprehensive answers.",
     ].join(" ");
 
     const modelTokenLimit = getModelTokenLimit(CHAT_MODEL);
@@ -407,12 +406,69 @@ serve(async (req) => {
       }
 
       if (totalPromptTokens > modelTokenLimit) {
-        return respond({
-          error: `Your request is too long (${totalPromptTokens} tokens). Even after truncating context, it exceeds the model's ${modelTokenLimit} token limit. Please shorten your query or document content.`,
-        }, 400);
+        return respond(
+          {
+            error: `Your request is too long (${totalPromptTokens} tokens). Even after truncating context, it exceeds the model's ${modelTokenLimit} token limit. Please shorten your query or document content.`,
+          },
+          400,
+        );
       }
     }
 
+    // ---------- Non-streaming mode ----------
+    if (!stream) {
+      const chatResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${openAIKeyResult.key}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: CHAT_MODEL,
+          temperature: 0.5,
+          max_tokens: 500,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: finalPrompt },
+          ],
+        }),
+      });
+
+      if (!chatResponse.ok) {
+        const errorText = await chatResponse.text();
+        console.error("Chat completion error (non-stream)", errorText);
+        return respond({ error: "AI coach request failed." }, chatResponse.status);
+      }
+
+      const completion = await chatResponse.json();
+      const fullReplyContent: string =
+        completion?.choices?.[0]?.message?.content ?? "Sorry, I couldn't generate a response.";
+
+      await supabaseClient.from("chat_messages").insert({
+        chat_session_id: currentChatSessionId,
+        role: "assistant",
+        content: fullReplyContent,
+      });
+
+      await logAiUsage(
+        supabaseClient,
+        project.id,
+        project.user_id,
+        "chat-ai-assistant (chat)",
+        CHAT_MODEL,
+        finalPrompt.length,
+        fullReplyContent.length
+      );
+
+      return respond({
+        reply: fullReplyContent,
+        sources,
+        chatSessionId: currentChatSessionId,
+        metadata: { history_pruned: historyPruned },
+      });
+    }
+
+    // ---------- Streaming SSE mode (existing behavior) ----------
     const chatResponse = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -427,7 +483,7 @@ serve(async (req) => {
           { role: "system", content: systemPrompt },
           { role: "user", content: finalPrompt },
         ],
-        stream: true, // Enable streaming
+        stream: true,
       }),
     });
 
@@ -437,7 +493,7 @@ serve(async (req) => {
       return respond({ error: "AI coach request failed." }, chatResponse.status);
     }
 
-    const stream = new ReadableStream({
+    const streamResponse = new ReadableStream({
       async start(controller) {
         const reader = chatResponse.body?.getReader();
         const decoder = new TextDecoder();
@@ -445,7 +501,7 @@ serve(async (req) => {
 
         try {
           while (true) {
-            const { done, value } = await reader.read();
+            const { done, value } = await reader!.read();
             if (done) break;
 
             const chunk = decoder.decode(value, { stream: true });
@@ -462,7 +518,9 @@ serve(async (req) => {
                   const token = json.choices[0].delta.content;
                   if (token) {
                     fullReplyContent += token;
-                    controller.enqueue(`data: ${JSON.stringify({ type: "token", content: token })}\n\n`);
+                    controller.enqueue(
+                      `data: ${JSON.stringify({ type: "token", content: token })}\n\n`,
+                    );
                   }
                 } catch (e) {
                   console.error("Error parsing stream chunk:", e, data);
@@ -471,7 +529,6 @@ serve(async (req) => {
             }
           }
 
-          // After stream is done, save full reply and log usage
           await supabaseClient.from("chat_messages").insert({
             chat_session_id: currentChatSessionId,
             role: "assistant",
@@ -488,23 +545,34 @@ serve(async (req) => {
             fullReplyContent.length
           );
 
-          // Send sources as a final event
-          controller.enqueue(`data: ${JSON.stringify({ type: "sources", content: sources, chatSessionId: currentChatSessionId, metadata: { history_pruned: historyPruned } })}\n\n`);
+          controller.enqueue(
+            `data: ${JSON.stringify({
+              type: "sources",
+              content: sources,
+              chatSessionId: currentChatSessionId,
+              metadata: { history_pruned: historyPruned },
+            })}\n\n`,
+          );
         } catch (error) {
           console.error("Stream processing error:", error);
-          controller.enqueue(`data: ${JSON.stringify({ type: "error", content: "An error occurred during streaming." })}\n\n`);
+          controller.enqueue(
+            `data: ${JSON.stringify({
+              type: "error",
+              content: "An error occurred during streaming.",
+            })}\n\n`,
+          );
         } finally {
           controller.close();
         }
       },
     });
 
-    return new Response(stream, {
+    return new Response(streamResponse, {
       headers: {
         ...corsHeaders,
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
-        "Connection": "keep-alive",
+        Connection: "keep-alive",
       },
     });
   } catch (error) {
@@ -590,15 +658,14 @@ async function createEmbedding(apiKey: string, text: string): Promise<number[]> 
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error("OpenAI embedding error", errorText);
+    console.error("Embedding error", errorText);
     throw new Error("Failed to generate embedding.");
   }
 
   const embeddingPayload = await response.json();
   const vector = embeddingPayload?.data?.[0]?.embedding;
-
   if (!Array.isArray(vector)) {
-    throw new Error("Embedding response missing vector data.");
+    throw new Error("Embedding vector missing in response.");
   }
 
   return vector.map((value: number) => Number(value));

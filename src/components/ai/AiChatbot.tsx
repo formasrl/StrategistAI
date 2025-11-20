@@ -70,7 +70,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
 
     const fetchHistory = async () => {
       if (!projectId) return;
-      
+
       if (isMounted) {
         setIsLoadingHistory(true);
         setMessages([]);
@@ -78,7 +78,6 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
       }
 
       try {
-        // Build query to find the most recent relevant session
         let query = supabase
           .from('chat_sessions')
           .select('id')
@@ -91,7 +90,6 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
         } else if (stepId) {
           query = query.eq('step_id', stepId).is('document_id', null);
         } else {
-          // Project level: no step, no doc
           query = query.is('step_id', null).is('document_id', null);
         }
 
@@ -102,7 +100,6 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
         } else if (sessionData && isMounted) {
           setCurrentChatSessionId(sessionData.id);
 
-          // Fetch messages for this session
           const { data: messagesData, error: messagesError } = await supabase
             .from('chat_messages')
             .select('*')
@@ -135,7 +132,6 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
     };
   }, [projectId, stepId, documentId]);
 
-  // Scroll on new messages
   useEffect(() => {
     const timeoutId = setTimeout(scrollToBottom, 100);
     return () => clearTimeout(timeoutId);
@@ -147,10 +143,9 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
     setInputMessage('');
   };
 
-  // Robust message rendering
   const renderMessageContent = (text: string | undefined | null) => {
     if (!text) return null;
-    
+
     try {
       const parts: React.ReactNode[] = [];
       const regex = /\[([^\]]+)\]\(([^)]+)\)/g;
@@ -201,6 +196,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
     setMessages((prev) => [...prev, aiPlaceholderMessage]);
 
     try {
+      const preferStreaming = typeof ReadableStream !== 'undefined';
       const response = await fetch(
         `${supabase.supabaseUrl}/functions/v1/chat-ai-assistant`,
         {
@@ -216,22 +212,54 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
             stepId,
             documentId,
             chatSessionId: currentChatSessionId,
+            stream: preferStreaming, // hint to backend
           }),
         },
       );
 
-      if (!response.ok || !response.body) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || 'Failed to get AI response.');
+      if (!response.ok) {
+        // Try JSON error body
+        let errorText = 'Failed to get AI response.';
+        try {
+          const errorJson = await response.json();
+          if (errorJson?.error) errorText = errorJson.error;
+        } catch {
+          // ignore parse error
+        }
+        throw new Error(errorText);
       }
 
+      const contentType = response.headers.get('Content-Type') || '';
+
+      // --- Non-streaming JSON path ---
+      if (!preferStreaming || !contentType.startsWith('text/event-stream') || !response.body) {
+        // Expect JSON: { reply, sources, chatSessionId, metadata }
+        const data = await response.json();
+        const fullReplyContent: string = data.reply || 'Sorry, I could not generate a response.';
+        const sources: ChatSource[] = data.sources || [];
+        const newChatSessionId: string | undefined = data.chatSessionId;
+
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === tempId
+              ? { ...msg, text: fullReplyContent, sources }
+              : msg
+          )
+        );
+
+        if (newChatSessionId) {
+          setCurrentChatSessionId(newChatSessionId);
+        }
+
+        return;
+      }
+
+      // --- Streaming SSE path (existing) ---
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let accumulatedContent = '';
       let aiResponseSources: ChatSource[] = [];
       let newChatSessionId: string | undefined = currentChatSessionId;
-      
-      // Buffer for handling incomplete stream chunks
       let buffer = '';
 
       while (true) {
@@ -240,27 +268,22 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
 
         const chunk = decoder.decode(value, { stream: true });
         buffer += chunk;
-        
-        // Split by double newline which separates SSE events
+
         const parts = buffer.split('\n\n');
-        
-        // The last part might be incomplete, so keep it in the buffer for the next iteration
-        // unless we are done, but 'done' is checked at start of loop. 
-        // We must only process complete events.
-        buffer = parts.pop() || ''; 
+        buffer = parts.pop() || '';
 
         for (const part of parts) {
           if (part.trim().startsWith('data: ')) {
-            const data = part.trim().substring(6);
-            if (data === '[DONE]') continue;
-            
+            const dataStr = part.trim().substring(6);
+            if (dataStr === '[DONE]') continue;
+
             try {
-              const json = JSON.parse(data);
-              
+              const json = JSON.parse(dataStr);
+
               if (json.type === 'token') {
                 const content = json.content || '';
                 accumulatedContent += content;
-                
+
                 setMessages((prev) =>
                   prev.map((msg) =>
                     msg.id === tempId
@@ -273,7 +296,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
                 if (json.chatSessionId) {
                   newChatSessionId = json.chatSessionId;
                 }
-                
+
                 setMessages((prev) =>
                   prev.map((msg) =>
                     msg.id === tempId
@@ -293,16 +316,14 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
               }
             } catch (e) {
               console.error('Error parsing stream chunk:', e);
-              // Do not throw here to prevent breaking the loop for one bad chunk
             }
           }
         }
       }
-      
+
       if (newChatSessionId) {
         setCurrentChatSessionId(newChatSessionId);
       }
-      
     } catch (err: any) {
       console.error('Error invoking chat-ai-assistant:', err);
       showError(`AI Error: ${err.message}`);
@@ -311,7 +332,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
           msg.id === tempId
             ? {
                 ...msg,
-                text: msg.text + `\n\nSorry, I encountered an error. Please try again.`,
+                text: (msg.text || '') + `\n\nSorry, I encountered an error. Please try again.`,
               }
             : msg,
         ),
@@ -464,9 +485,9 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
         <ScrollArea className="h-full p-4">
           <div className="space-y-4 pb-4 min-h-[200px]">
             {isLoadingHistory && (
-               <div className="flex justify-center py-4">
-                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-               </div>
+              <div className="flex justify-center py-4">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
             )}
             {!isLoadingHistory && messages.length === 0 && (
               <div className="text-center text-muted-foreground italic py-8 px-4">
