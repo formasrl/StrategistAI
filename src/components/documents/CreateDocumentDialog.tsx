@@ -3,7 +3,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { supabase } from '@/integrations/supabase/client';
-import { showError, showSuccess } from '@/utils/toast';
+import { showError } from '@/utils/toast';
 import {
   Dialog,
   DialogContent,
@@ -62,7 +62,7 @@ const CreateDocumentDialog: React.FC<CreateDocumentDialogProps> = ({
     if (error) {
       showError(`Failed to create document: ${error.message}`);
     } else {
-      showSuccess('Document created successfully!');
+      // Toast removed
       form.reset();
       onDocumentCreated();
       onClose();

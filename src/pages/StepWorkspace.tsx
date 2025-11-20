@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Step, AiReview } from '@/types/supabase';
-import { showError, showSuccess } from '@/utils/toast';
+import { showError } from '@/utils/toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
@@ -109,7 +109,7 @@ const StepWorkspace: React.FC = () => {
           return;
         }
         setPrimaryDocumentId(newDocData.id);
-        showSuccess(`Created a new document for "${stepData.step_name}".`);
+        // Toast removed
       }
       setIsLoadingDocument(false);
     };
