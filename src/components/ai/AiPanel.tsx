@@ -13,9 +13,10 @@ interface AiPanelProps {
   phaseId?: string;
   stepId?: string;
   documentId?: string;
-  aiReview: AiReview | null;
-  isAiReviewLoading: boolean;
-  onGenerateReview: (docId: string) => void;
+  // Making these optional as we are moving logic to AiPanelContent
+  aiReview?: AiReview | null;
+  isAiReviewLoading?: boolean;
+  onGenerateReview?: (docId: string) => void;
 }
 
 const AiPanel: React.FC<AiPanelProps> = ({
@@ -23,9 +24,6 @@ const AiPanel: React.FC<AiPanelProps> = ({
   phaseId,
   stepId,
   documentId,
-  aiReview,
-  isAiReviewLoading,
-  onGenerateReview,
 }) => {
   return (
     <Tabs defaultValue="chat" className="flex h-full min-h-0 flex-col">
@@ -33,7 +31,7 @@ const AiPanel: React.FC<AiPanelProps> = ({
         <TabsTrigger value="chat" className="flex items-center gap-2">
           <MessageCircle className="h-4 w-4" /> Chat
         </TabsTrigger>
-        <TabsTrigger value="review" className="flex items-center gap-2" disabled={!documentId}>
+        <TabsTrigger value="review" className="flex items-center gap-2">
           <Brain className="h-4 w-4" /> Review
         </TabsTrigger>
       </TabsList>
@@ -50,9 +48,7 @@ const AiPanel: React.FC<AiPanelProps> = ({
         <ScrollArea className="flex-1 pr-2">
           <AiPanelContent
             documentId={documentId}
-            aiReview={aiReview}
-            isAiReviewLoading={isAiReviewLoading}
-            onGenerateReview={onGenerateReview}
+            projectId={projectId}
           />
         </ScrollArea>
       </TabsContent>
