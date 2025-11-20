@@ -48,6 +48,20 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
   const currentDocumentId = propDocumentId ?? routeParams.documentId;
   const navigate = useNavigate();
 
+  // Suppress ReactQuill's deprecated findDOMNode warning
+  useEffect(() => {
+    const originalError = console.error;
+    console.error = (...args) => {
+      if (args[0] && typeof args[0] === 'string' && args[0].includes('findDOMNode')) {
+        return;
+      }
+      originalError.apply(console, args);
+    };
+    return () => {
+      console.error = originalError;
+    };
+  }, []);
+
   const outletContext = useOutletContext<DashboardOutletContext | undefined>();
   const {
     setAiReview: contextSetAiReview,
@@ -97,9 +111,6 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
     if (document?.step_id) {
       contextSetStepIdForAiPanel?.(document.step_id);
     }
-    // We do NOT revert this on unmount because the user might navigate 
-    // to another tab in the dashboard but stay in the same "context" 
-    // broadly speaking.
   }, [document?.step_id, contextSetStepIdForAiPanel]);
 
   const [isLoadingDocument, setIsLoadingDocument] = useState(true);
@@ -374,6 +385,7 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
         rawTextContent = mammoth.extractRawText({ arrayBuffer }).value;
       } else if (fileExtension === 'html') {
         contentHtml = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
           reader.onload = (e) => resolve(e.target?.result as string);
           reader.readAsText(file);
         });
@@ -381,6 +393,7 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
       } else if (fileExtension === 'md') {
         const { marked } = await import('marked');
         const markdownText = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
           reader.onload = (e) => resolve(e.target?.result as string);
           reader.readAsText(file);
         });
@@ -415,7 +428,6 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
         fileInputRef.current.value = '';
       }
     }
-    const reader = new FileReader(); // Moved inside for proper scoping if needed, or clean up if unused.
   };
 
   const fetchStepSuggestions = async (projectId: string, documentContent: string) => {

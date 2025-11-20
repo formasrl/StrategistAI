@@ -25,7 +25,7 @@ const App = () => (
       <Toaster />
       <Sonner />
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-        <BrowserRouter>
+        <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
           <SessionContextProvider>
             <AppSetupProvider>
               <Routes>
