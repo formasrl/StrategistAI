@@ -8,6 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Lightbulb, Loader2 } from 'lucide-react';
 import DocumentEditor from './DocumentEditor';
+import { stepGuidanceLibrary } from '@/utils/stepGuidanceData';
 
 interface StepWorkspaceOutletContext {
   setAiReview: (review: AiReview | null) => void;
@@ -136,6 +137,8 @@ const StepWorkspace: React.FC = () => {
     );
   }
 
+  const guidance = stepGuidanceLibrary[step.step_name];
+
   return (
     <div className="flex flex-col h-full space-y-4">
       <Card className="w-full">
@@ -143,31 +146,34 @@ const StepWorkspace: React.FC = () => {
           <Lightbulb className="h-5 w-5 text-blue-500" />
           <CardTitle className="text-xl font-bold">Guidance: {step.step_name}</CardTitle>
         </CardHeader>
-        <CardContent className="p-4 pt-0 text-sm text-muted-foreground space-y-2">
-          {step.description && (
+        <CardContent className="p-4 pt-0 text-sm text-muted-foreground space-y-4">
+          <div>
+            <h3 className="font-semibold text-foreground">What this step is about:</h3>
+            <p>{guidance?.description || step.description || "No description available."}</p>
+          </div>
+          
+          <div>
+            <h3 className="font-semibold text-foreground">Why it matters:</h3>
+            <p>{guidance?.why_matters || step.why_matters || "No context available."}</p>
+          </div>
+          
+          {guidance?.guiding_questions && guidance.guiding_questions.length > 0 && (
             <div>
-              <h3 className="font-semibold text-foreground">What this step is about:</h3>
-              <p>{step.description}</p>
+              <h3 className="font-semibold text-foreground">Guiding Questions:</h3>
+              <ul className="list-disc pl-5 space-y-1">
+                {guidance.guiding_questions.map((question, index) => (
+                  <li key={index}>{question}</li>
+                ))}
+              </ul>
             </div>
           )}
-          {step.why_matters && (
+
+          {guidance?.expected_output && (
             <div>
-              <h3 className="font-semibold text-foreground">Why it matters:</h3>
-              <p>{step.why_matters}</p>
+              <h3 className="font-semibold text-foreground">Expected Output:</h3>
+              <p className="font-medium text-primary">{guidance.expected_output}</p>
             </div>
           )}
-          <div>
-            <h3 className="font-semibold text-foreground">Guiding Questions:</h3>
-            <ul className="list-disc pl-5">
-              <li>What is the core purpose of this brand?</li>
-              <li>Who is the primary target audience?</li>
-              <li>What makes this brand unique compared to competitors?</li>
-            </ul>
-          </div>
-          <div>
-            <h3 className="font-semibold text-foreground">Expected Output:</h3>
-            <p>A concise document outlining the key strategic decisions for "{step.step_name}".</p>
-          </div>
         </CardContent>
       </Card>
 
