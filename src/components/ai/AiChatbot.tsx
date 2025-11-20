@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { MessageCircle, Send, Loader2, Bot, User, ChevronDown, ChevronUp, BookOpen } from 'lucide-react';
+import { MessageCircle, Send, Loader2, Bot, User, ChevronDown, ChevronUp, BookOpen, RefreshCw, Trash2 } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { supabase } from '@/integrations/supabase/client';
 import { useSession } from '@/integrations/supabase/SessionContextProvider';
@@ -14,6 +14,12 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
 import { Link } from 'react-router-dom';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface ChatSource {
   document_name: string;
@@ -41,14 +47,96 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [currentChatSessionId, setCurrentChatSessionId] = useState<string | undefined>(undefined);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Use a small timeout to ensure DOM is updated before scrolling
+    setTimeout(() => {
+      if (messagesEndRef.current) {
+        messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }, 100);
   };
 
-  useEffect(scrollToBottom, [messages]);
+  // Fetch chat history when context changes
+  useEffect(() => {
+    const fetchHistory = async () => {
+      if (!projectId) return;
+      
+      setIsLoadingHistory(true);
+      setMessages([]);
+      setCurrentChatSessionId(undefined);
+
+      try {
+        // Build query to find the most recent relevant session
+        let query = supabase
+          .from('chat_sessions')
+          .select('id')
+          .eq('project_id', projectId)
+          .order('updated_at', { ascending: false })
+          .limit(1);
+
+        if (documentId) {
+          query = query.eq('document_id', documentId);
+        } else if (stepId) {
+          query = query.eq('step_id', stepId).is('document_id', null);
+        } else {
+          // Project level: no step, no doc
+          query = query.is('step_id', null).is('document_id', null);
+        }
+
+        const { data: sessionData, error: sessionError } = await query.maybeSingle();
+
+        if (sessionError) {
+          console.error('Error fetching chat session:', sessionError);
+        } else if (sessionData) {
+          setCurrentChatSessionId(sessionData.id);
+
+          // Fetch messages for this session
+          const { data: messagesData, error: messagesError } = await supabase
+            .from('chat_messages')
+            .select('*')
+            .eq('chat_session_id', sessionData.id)
+            .order('created_at', { ascending: true });
+
+          if (messagesError) {
+            console.error('Error fetching messages:', messagesError);
+          } else if (messagesData) {
+            const formattedMessages: ChatMessage[] = messagesData.map((msg) => ({
+              id: msg.id,
+              sender: msg.role === 'user' ? 'user' : 'ai',
+              text: msg.content,
+              timestamp: msg.created_at,
+              // Note: Sources are currently not stored in basic message table, 
+              // so historical messages won't show sources unless we expand schema.
+              // Keeping it simple for now.
+            }));
+            setMessages(formattedMessages);
+          }
+        }
+      } catch (err) {
+        console.error('Unexpected error loading history:', err);
+      } finally {
+        setIsLoadingHistory(false);
+      }
+    };
+
+    fetchHistory();
+  }, [projectId, stepId, documentId]);
+
+  // Scroll on new messages
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  const handleNewChat = () => {
+    setMessages([]);
+    setCurrentChatSessionId(undefined);
+    setInputMessage('');
+  };
 
   const renderMessageContent = useCallback((text: string) => {
     const parts: React.ReactNode[] = [];
@@ -306,15 +394,34 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
 
   return (
     <Card className="flex flex-col h-full border-none shadow-none bg-transparent">
-      <CardHeader className="p-4 pb-2 border-b border-border">
+      <CardHeader className="p-4 pb-2 border-b border-border flex flex-row items-center justify-between space-y-0">
         <CardTitle className="text-lg font-semibold flex items-center gap-2">
-          <MessageCircle className="h-5 w-5 text-blue-500" /> AI Chatbot ({getContextTitle()})
+          <MessageCircle className="h-5 w-5 text-blue-500" />
+          <span className="truncate max-w-[150px] sm:max-w-md">{getContextTitle()}</span>
         </CardTitle>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon" onClick={handleNewChat} className="h-8 w-8">
+                <RefreshCw className="h-4 w-4 text-muted-foreground hover:text-foreground" />
+                <span className="sr-only">New Chat</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Start New Chat Session</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       </CardHeader>
-      <CardContent className="flex-1 p-4 overflow-hidden">
-        <ScrollArea className="h-full pr-2">
-          <div className="space-y-4">
-            {messages.length === 0 && (
+      <CardContent className="flex-1 p-0 overflow-hidden relative">
+        <ScrollArea className="h-full p-4">
+          <div className="space-y-4 pb-4">
+            {isLoadingHistory && (
+               <div className="flex justify-center py-4">
+                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+               </div>
+            )}
+            {!isLoadingHistory && messages.length === 0 && (
               <div className="text-center text-muted-foreground italic py-4">
                 Start a conversation with your AI Brand Strategist!
               </div>
@@ -332,13 +439,13 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
                 )}
                 <div
                   className={cn(
-                    'max-w-[80%] p-3 rounded-lg',
+                    'max-w-[85%] p-3 rounded-lg',
                     msg.sender === 'user'
                       ? 'bg-primary text-primary-foreground rounded-br-none'
                       : 'bg-muted text-muted-foreground rounded-bl-none',
                   )}
                 >
-                  <p className="text-sm whitespace-pre-wrap">{renderMessageContent(msg.text)}</p>
+                  <p className="text-sm whitespace-pre-wrap break-words">{renderMessageContent(msg.text)}</p>
                   <span className="block text-xs opacity-70 mt-1">
                     {new Date(msg.timestamp).toLocaleTimeString([], {
                       hour: '2-digit',
@@ -355,17 +462,17 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
             {isSending && (
               <div className="flex items-start gap-3 justify-start">
                 <Bot className="h-6 w-6 text-blue-500 flex-shrink-0 mt-1" />
-                <div className="max-w-[80%] p-3 rounded-lg bg-muted text-muted-foreground rounded-bl-none">
+                <div className="max-w-[85%] p-3 rounded-lg bg-muted text-muted-foreground rounded-bl-none">
                   <Loader2 className="h-4 w-4 animate-spin inline-block mr-2" />
                   <span className="text-sm">AI is thinking...</span>
                 </div>
               </div>
             )}
-            <div ref={messagesEndRef} />
+            <div ref={messagesEndRef} className="h-1" />
           </div>
         </ScrollArea>
       </CardContent>
-      <CardFooter className="p-4 pt-2 border-t border-border">
+      <CardFooter className="p-4 pt-2 border-t border-border bg-background z-10">
         <form onSubmit={handleSendMessage} className="flex w-full space-x-2">
           <Input
             id="tour-ai-chat-input"
@@ -374,6 +481,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
             onChange={(e) => setInputMessage(e.target.value)}
             disabled={isSending}
             className="flex-1"
+            autoComplete="off"
           />
           <Button type="submit" size="icon" disabled={!inputMessage.trim() || isSending}>
             {isSending ? (
