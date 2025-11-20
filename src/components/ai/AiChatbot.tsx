@@ -5,6 +5,7 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/componen
 import { MessageCircle, Send, Loader2, Bot, User, ChevronDown, ChevronUp, BookOpen, PlusCircle, RefreshCw } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { supabase } from '@/integrations/supabase/client';
+import { useSession } from '@/integrations/supabase/SessionContextProvider'; // <--- ADDED THIS IMPORT
 import { showError } from '@/utils/toast';
 import { cn } from '@/lib/utils';
 import {
