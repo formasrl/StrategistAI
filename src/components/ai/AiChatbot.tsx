@@ -1,11 +1,11 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { MessageCircle, Send, Loader2, Bot, User, ChevronDown, ChevronUp, BookOpen, PlusCircle, RefreshCw } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { supabase } from '@/integrations/supabase/client';
-import { useSession } from '@/integrations/supabase/SessionContextProvider'; // <--- ADDED THIS IMPORT
+import { useSession } from '@/integrations/supabase/SessionContextProvider';
 import { showError } from '@/utils/toast';
 import { cn } from '@/lib/utils';
 import {
@@ -108,7 +108,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
             const formattedMessages: ChatMessage[] = messagesData.map((msg) => ({
               id: msg.id,
               sender: msg.role === 'user' ? 'user' : 'ai',
-              text: msg.content || '', // Ensure text is never null
+              text: msg.content || '',
               timestamp: msg.created_at,
             }));
             setMessages(formattedMessages);
@@ -130,7 +130,6 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
 
   // Scroll on new messages
   useEffect(() => {
-    // Small timeout to allow DOM to update
     const timeoutId = setTimeout(scrollToBottom, 100);
     return () => clearTimeout(timeoutId);
   }, [messages, isSending]);
@@ -141,7 +140,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
     setInputMessage('');
   };
 
-  // Robust message rendering to prevent crashes
+  // Robust message rendering
   const renderMessageContent = (text: string | undefined | null) => {
     if (!text) return null;
     
@@ -150,8 +149,6 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
       const regex = /\[([^\]]+)\]\(([^)]+)\)/g;
       let lastIndex = 0;
       let match;
-
-      // Limit iterations to prevent potential infinite loops with malformed regex
       let loopCount = 0;
       const MAX_LOOPS = 100;
 
@@ -176,7 +173,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
       return <>{parts}</>;
     } catch (e) {
       console.error("Error rendering message content:", e);
-      return <>{text}</>; // Fallback to raw text
+      return <>{text}</>;
     }
   };
 
@@ -226,23 +223,32 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
       let accumulatedContent = '';
       let aiResponseSources: ChatSource[] = [];
       let newChatSessionId: string | undefined = currentChatSessionId;
+      
+      // Buffer for handling incomplete stream chunks
+      let buffer = '';
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
         const chunk = decoder.decode(value, { stream: true });
-        console.log('Raw chunk from Edge Function:', chunk); // Log raw chunk
-        const lines = chunk.split('\n\n').filter(Boolean);
+        buffer += chunk;
+        
+        // Split by double newline which separates SSE events
+        const parts = buffer.split('\n\n');
+        
+        // The last part might be incomplete, so keep it in the buffer for the next iteration
+        // unless we are done, but 'done' is checked at start of loop. 
+        // We must only process complete events.
+        buffer = parts.pop() || ''; 
 
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.substring(6);
+        for (const part of parts) {
+          if (part.trim().startsWith('data: ')) {
+            const data = part.trim().substring(6);
             if (data === '[DONE]') continue;
             
             try {
               const json = JSON.parse(data);
-              console.log('Parsed JSON from Edge Function:', json); // Log parsed JSON
               
               if (json.type === 'token') {
                 const content = json.content || '';
@@ -255,7 +261,6 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
                       : msg
                   )
                 );
-                console.log('Accumulated content:', accumulatedContent); // Log accumulated content
               } else if (json.type === 'sources') {
                 aiResponseSources = json.content || [];
                 if (json.chatSessionId) {
@@ -270,7 +275,6 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
                   )
                 );
               } else if (json.type === 'error') {
-                console.error("AI Stream Error:", json.content);
                 accumulatedContent += `\n\n*[Error: ${json.content}]*`;
                 setMessages((prev) =>
                   prev.map((msg) =>
@@ -281,7 +285,8 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
                 );
               }
             } catch (e) {
-              console.error('Error parsing stream chunk:', e, data);
+              console.error('Error parsing stream chunk:', e);
+              // Do not throw here to prevent breaking the loop for one bad chunk
             }
           }
         }
