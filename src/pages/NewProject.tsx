@@ -96,6 +96,8 @@ const NewProject: React.FC = () => {
           status: 'not_started', // Default status for steps
           timeline: initialStep.timeline || null,
           order_index: initialStep.order_index,
+          guiding_questions: initialStep.guiding_questions || null,
+          expected_output: initialStep.expected_output || null,
         }));
 
         const { error: stepsError } = await supabase
