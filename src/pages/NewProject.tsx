@@ -18,8 +18,27 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { initialRoadmapData } from '@/utils/initialRoadmapData';
 import { Loader2 } from 'lucide-react';
+
+// Define the structure types for the template JSON
+interface TemplateStep {
+  step_number: number;
+  step_name: string;
+  description?: string;
+  why_matters?: string;
+  dependencies?: string[];
+  timeline?: string;
+  order_index: number;
+  guiding_questions?: string[];
+  expected_output?: string;
+}
+
+interface TemplatePhase {
+  phase_number: number;
+  phase_name: string;
+  description: string;
+  steps: TemplateStep[];
+}
 
 const formSchema = z.object({
   name: z.string().min(1, { message: 'Project name is required.' }),
@@ -50,7 +69,20 @@ const NewProject: React.FC = () => {
     setIsSubmitting(true);
 
     try {
-      // 1. Insert the new project
+      // 1. Fetch the "Standard Brand Strategy" template
+      const { data: templateData, error: templateError } = await supabase
+        .from('project_templates')
+        .select('*')
+        .eq('name', 'Standard Brand Strategy')
+        .single();
+
+      if (templateError || !templateData) {
+        throw new Error('Standard project template not found. Please contact support or run migration.');
+      }
+
+      const roadmapStructure = templateData.structure as unknown as TemplatePhase[];
+
+      // 2. Insert the new project
       const { data: projectData, error: projectError } = await supabase
         .from('projects')
         .insert({
@@ -66,16 +98,16 @@ const NewProject: React.FC = () => {
 
       const newProjectId = projectData.id;
 
-      // 2. Insert phases and their steps
-      for (const initialPhase of initialRoadmapData) {
+      // 3. Insert phases and their steps from the fetched template
+      for (const phase of roadmapStructure) {
         const { data: phaseData, error: phaseError } = await supabase
           .from('phases')
           .insert({
             project_id: newProjectId,
-            phase_number: initialPhase.phase_number,
-            phase_name: initialPhase.phase_name,
-            description: initialPhase.description,
-            status: 'not_started', // Default status
+            phase_number: phase.phase_number,
+            phase_name: phase.phase_name,
+            description: phase.description,
+            status: 'not_started',
             completion_percentage: 0,
           })
           .select()
@@ -85,19 +117,20 @@ const NewProject: React.FC = () => {
 
         const newPhaseId = phaseData.id;
 
-        // Insert steps for the current phase
-        const stepsToInsert = initialPhase.steps.map((initialStep) => ({
+        // Map template steps to DB columns
+        const stepsToInsert = phase.steps.map((step) => ({
           phase_id: newPhaseId,
-          step_number: initialStep.step_number,
-          step_name: initialStep.step_name,
-          description: initialStep.description || null,
-          why_matters: initialStep.why_matters || null,
-          dependencies: initialStep.dependencies || [],
-          status: 'not_started', // Default status for steps
-          timeline: initialStep.timeline || null,
-          order_index: initialStep.order_index,
-          guiding_questions: initialStep.guiding_questions || null,
-          expected_output: initialStep.expected_output || null,
+          step_number: step.step_number,
+          step_name: step.step_name,
+          description: step.description || null,
+          why_matters: step.why_matters || null,
+          dependencies: step.dependencies ? JSON.stringify(step.dependencies) : '[]', // Store as JSON string if needed or let supabase handle jsonb
+          status: 'not_started',
+          timeline: step.timeline || null,
+          order_index: step.order_index,
+          // Critical: Map new content fields
+          guiding_questions: step.guiding_questions ? step.guiding_questions : null, // array -> jsonb handled by supabase client usually
+          expected_output: step.expected_output || null,
         }));
 
         const { error: stepsError } = await supabase
@@ -108,7 +141,7 @@ const NewProject: React.FC = () => {
       }
 
       showSuccess('Project created successfully!');
-      navigate(`/project/${newProjectId}`);
+      navigate(`/dashboard/${newProjectId}`);
     } catch (error: any) {
       showError(`Failed to create project: ${error.message}`);
       console.error('Project creation error:', error);
