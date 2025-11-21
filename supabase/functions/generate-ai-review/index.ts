@@ -56,8 +56,8 @@ interface StepRecord {
   description: string | null;
   why_matters: string | null;
   timeline: string | null;
-  guiding_questions: string[] | null; // New field
-  expected_output: string | null; // New field
+  guiding_questions: string[] | null;
+  expected_output: string | null;
   phases?: {
     phase_name: string | null;
     phase_number: number | null;
@@ -158,7 +158,7 @@ serve(async (req) => {
 
     let currentProjectProfile = fetchProjectProfileText(project);
 
-    // Fetch step details - Updated to select guiding_questions and expected_output
+    // Fetch step details including guiding questions and expected output
     const { data: stepData, error: stepError } = await supabaseClient
       .from("steps")
       .select("id, step_name, description, why_matters, timeline, guiding_questions, expected_output, phases(phase_name, phase_number, project_id)")
@@ -286,7 +286,7 @@ serve(async (req) => {
       summary?: unknown;
       strengths?: unknown;
       issues?: unknown;
-      consistency_issues?: unknown; // New field
+      consistency_issues?: unknown;
       suggestions?: unknown;
       readiness?: unknown;
       readiness_reason?: unknown;
@@ -309,7 +309,7 @@ serve(async (req) => {
       strengths: normalized.strengths,
       suggestions: normalized.suggestions,
       issues: normalized.issues,
-      consistency_issues: normalized.consistencyIssues, // Store new field
+      consistency_issues: normalized.consistencyIssues,
       summary: normalized.summary,
       readiness: normalized.readiness,
       readiness_reason: normalized.readinessReason,
@@ -327,7 +327,7 @@ serve(async (req) => {
         summary: normalized.summary,
         strengths: normalized.strengths,
         issues: normalized.issues,
-        consistency_issues: normalized.consistencyIssues, // Return new field
+        consistency_issues: normalized.consistencyIssues,
         suggestions: normalized.suggestions,
         readiness: normalized.readiness,
         readiness_reason: normalized.readinessReason,
@@ -392,69 +392,6 @@ function fetchProjectProfileText(project: ProjectRecord): string {
   ].join("\n");
 }
 
-async function createQueryEmbedding(apiKey: string, text: string): Promise<number[]> {
-  const response = await fetch("https://api.openai.com/v1/embeddings", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: EMBEDDING_MODEL,
-      input: text,
-    }),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error("Embedding error", errorText);
-    throw new Error("Failed to generate embedding.");
-  }
-
-  const payload = await response.json();
-  const vector = payload?.data?.[0]?.embedding;
-  if (!Array.isArray(vector)) {
-    throw new Error("Embedding vector missing in response.");
-  }
-
-  return vector.map((value: number) => Number(value));
-}
-
-async function retrieveMemories(
-  client: ReturnType<typeof createClient>,
-  projectId: string,
-  embedding: number[]
-): Promise<MemoryMatch[]> {
-  const { data, error } = await client.rpc("match_project_memories", {
-    input_project_id: projectId,
-    query_embedding: embedding,
-    match_count: 4,
-    similarity_threshold: 1.6,
-  });
-
-  if (error) {
-    console.error("Memory retrieval error", error);
-    return [];
-  }
-
-  if (!ArrayOf(data)) {
-    return [];
-  }
-
-  return data as MemoryMatch[];
-}
-
-function buildEmbeddingPrompt(draft: string, step: StepRecord): string {
-  return [
-    step.step_name ?? "",
-    step.description ?? "",
-    step.why_matters ?? "",
-    draft.slice(0, 2000),
-  ]
-    .filter(Boolean)
-    .join("\n");
-}
-
 const REVIEW_SYSTEM_PROMPT = [
   "You are StrategistAI, a senior brand strategist reviewer.",
   "The user writes their own documents; you review and coach.",
@@ -479,7 +416,7 @@ function buildReviewPrompt({
     `CURRENT STEP:\n${formatStepDefinition(step)}`,
     `PREVIOUS BRAND DECISIONS TO CONSIDER:\n${formatMemories(memories)}`,
     `CURRENT DRAFT:\n${draft}`,
-    "TASK:\nReview the draft against the project profile, the current step's goal, and the previous brand decisions.",
+    "TASK:\nReview the draft against the project profile, the current step's goal, guiding questions, expected output, and the previous brand decisions.",
     "Specifically flag any inconsistencies or conflicts between the current draft and the 'PREVIOUS BRAND DECISIONS TO CONSIDER' section.",
     "Return strict JSON with keys:",
     `{
@@ -545,10 +482,6 @@ function convertDistanceToScore(distance: number): string {
   return "very low";
 }
 
-function limitDraftLength(draft: string): string {
-  return draft;
-}
-
 function sanitizeLine(value: string | null, fallback: string): string {
   if (!value) return fallback;
   const trimmed = value.trim();
@@ -571,7 +504,7 @@ function normalizeReview(raw: {
 
   const strengths = sanitizeStringArray(raw.strengths, 7, 120);
   const issues = sanitizeStringArray(raw.issues, 7, 140);
-  const consistencyIssues = sanitizeStringArray(raw.consistency_issues, 6, 140); // Handle new field
+  const consistencyIssues = sanitizeStringArray(raw.consistency_issues, 6, 140);
   const suggestions = sanitizeStringArray(raw.suggestions, 7, 140);
 
   let readiness = typeof raw.readiness === "string" ? raw.readiness.toLowerCase().trim() : "not_ready";
