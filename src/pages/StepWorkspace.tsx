@@ -108,7 +108,6 @@ const StepWorkspace: React.FC = () => {
           return;
         }
         setPrimaryDocumentId(newDocData.id);
-        // Toast removed
       }
       setIsLoadingDocument(false);
     };
@@ -136,8 +135,7 @@ const StepWorkspace: React.FC = () => {
     );
   }
 
-  // Use step data directly from Supabase
-  const guidingQuestions = step.guiding_questions || [];
+  const guidingQuestions = (step.guiding_questions as string[]) || [];
 
   return (
     <div className="flex flex-col h-full space-y-4">
@@ -151,13 +149,13 @@ const StepWorkspace: React.FC = () => {
           {/* Description */}
           <div>
             <h3 className="font-semibold text-foreground">What this step is about:</h3>
-            <p>{step.description || "No description available."}</p>
+            <p>{step.description}</p>
           </div>
           
           {/* Why it Matters */}
           <div>
             <h3 className="font-semibold text-foreground">Why it matters:</h3>
-            <p>{step.why_matters || "No context available."}</p>
+            <p>{step.why_matters}</p>
           </div>
           
           {/* Guiding Questions */}
@@ -170,7 +168,7 @@ const StepWorkspace: React.FC = () => {
                 ))}
               </ul>
             ) : (
-              <p>No specific guiding questions available for this step yet.</p>
+              <p className="italic">No specific questions for this step.</p>
             )}
           </div>
 
@@ -178,8 +176,7 @@ const StepWorkspace: React.FC = () => {
           <div>
             <h3 className="font-semibold text-foreground">Expected Output:</h3>
             <p className="font-medium text-primary">
-              {step.expected_output || 
-               `A concise document outlining the key strategic decisions for "${step.step_name}".`}
+              {step.expected_output}
             </p>
           </div>
         </CardContent>
