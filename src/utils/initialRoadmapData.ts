@@ -8,6 +8,8 @@ interface InitialStep {
   dependencies?: string[];
   timeline?: string;
   order_index: number;
+  guiding_questions?: string[];
+  expected_output?: string;
 }
 
 interface InitialPhase {
@@ -24,12 +26,16 @@ const getStepData = (stepName: string) => {
     console.warn(`Missing guidance data for step: ${stepName}`);
     return {
       description: "",
-      why_matters: ""
+      why_matters: "",
+      guiding_questions: [],
+      expected_output: ""
     };
   }
   return {
     description: data.description,
-    why_matters: data.why_matters
+    why_matters: data.why_matters,
+    guiding_questions: data.guiding_questions,
+    expected_output: data.expected_output
   };
 };
 
