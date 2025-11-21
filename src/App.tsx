@@ -12,7 +12,8 @@ import ProjectDetails from "./pages/ProjectDetails";
 import DocumentEditor from "./pages/DocumentEditor";
 import UserSettings from "./pages/UserSettings";
 import Profile from "./pages/Profile";
-import StepWorkspace from "./pages/StepWorkspace"; // New import for StepWorkspace
+import StepWorkspace from "./pages/StepWorkspace";
+import AdminMigration from "./pages/AdminMigration"; // New import
 import { SessionContextProvider } from "./integrations/supabase/SessionContextProvider";
 import { ThemeProvider } from "next-themes";
 import AppSetupProvider from "./components/layout/AppSetupProvider";
@@ -32,6 +33,9 @@ const App = () => (
                 <Route path="/" element={<Index />} />
                 <Route path="/login" element={<Login />} />
                 <Route path="/project/new" element={<ProjectCreation />} />
+                {/* Admin Route */}
+                <Route path="/admin/migration" element={<AdminMigration />} />
+                
                 <Route path="/dashboard" element={<Dashboard />}>
                   <Route index element={
                     <div className="flex flex-col items-center justify-center h-full">
@@ -42,12 +46,11 @@ const App = () => (
                     </div>
                   } />
                   <Route path=":projectId" element={<ProjectDetails />} />
-                  <Route path=":projectId/step/:stepId" element={<StepWorkspace />} /> {/* New route for StepWorkspace */}
+                  <Route path=":projectId/step/:stepId" element={<StepWorkspace />} />
                   <Route path=":projectId/document/:documentId" element={<DocumentEditor />} />
                   <Route path="settings" element={<UserSettings />} />
                   <Route path="profile" element={<Profile />} />
                 </Route>
-                {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </AppSetupProvider>
