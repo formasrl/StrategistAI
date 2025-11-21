@@ -56,6 +56,8 @@ interface StepRecord {
   description: string | null;
   why_matters: string | null;
   timeline: string | null;
+  guiding_questions: string[] | null; // New field
+  expected_output: string | null; // New field
   phases?: {
     phase_name: string | null;
     phase_number: number | null;
@@ -156,10 +158,10 @@ serve(async (req) => {
 
     let currentProjectProfile = fetchProjectProfileText(project);
 
-    // Fetch step details
+    // Fetch step details - Updated to select guiding_questions and expected_output
     const { data: stepData, error: stepError } = await supabaseClient
       .from("steps")
-      .select("id, step_name, description, why_matters, timeline, phases(phase_name, phase_number, project_id)")
+      .select("id, step_name, description, why_matters, timeline, guiding_questions, expected_output, phases(phase_name, phase_number, project_id)")
       .eq("id", effectiveStepId)
       .maybeSingle();
 
@@ -496,12 +498,18 @@ function buildReviewPrompt({
 }
 
 function formatStepDefinition(step: StepRecord): string {
+  const guidingQuestions = step.guiding_questions && step.guiding_questions.length > 0
+    ? step.guiding_questions.map(q => `- ${q}`).join("\n")
+    : null;
+
   const lines = [
     `Name: ${sanitizeLine(step.step_name, "Untitled Step")}`,
     step.phases?.phase_name ? `Phase: ${step.phases.phase_name}` : undefined,
     step.description ? `Goal: ${step.description}` : undefined,
     step.why_matters ? `Why it matters: ${step.why_matters}` : undefined,
     step.timeline ? `Timeline: ${step.timeline}` : undefined,
+    guidingQuestions ? `Guiding Questions:\n${guidingQuestions}` : undefined,
+    step.expected_output ? `Expected Output: ${step.expected_output}` : undefined,
   ].filter(Boolean);
 
   return lines.join("\n");
