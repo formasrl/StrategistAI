@@ -124,12 +124,12 @@ const NewProject: React.FC = () => {
           step_name: step.step_name,
           description: step.description || null,
           why_matters: step.why_matters || null,
-          dependencies: step.dependencies ? JSON.stringify(step.dependencies) : '[]', // Store as JSON string if needed or let supabase handle jsonb
+          dependencies: step.dependencies ? JSON.stringify(step.dependencies) : '[]',
           status: 'not_started',
           timeline: step.timeline || null,
           order_index: step.order_index,
-          // Critical: Map new content fields
-          guiding_questions: step.guiding_questions ? step.guiding_questions : null, // array -> jsonb handled by supabase client usually
+          // Explicitly map content fields
+          guiding_questions: step.guiding_questions || null,
           expected_output: step.expected_output || null,
         }));
 
