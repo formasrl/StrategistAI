@@ -8,7 +8,6 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Lightbulb, Loader2 } from 'lucide-react';
 import DocumentEditor from './DocumentEditor';
-import { stepGuidanceLibrary, StepGuidance } from '@/utils/stepGuidanceData';
 
 interface StepWorkspaceOutletContext {
   setAiReview: (review: AiReview | null) => void;
@@ -137,8 +136,8 @@ const StepWorkspace: React.FC = () => {
     );
   }
 
-  // Look up guidance based on the step name
-  const staticGuidance: StepGuidance | undefined = stepGuidanceLibrary[step.step_name];
+  // Use step data directly from Supabase
+  const guidingQuestions = step.guiding_questions || [];
 
   return (
     <div className="flex flex-col h-full space-y-4">
@@ -152,21 +151,21 @@ const StepWorkspace: React.FC = () => {
           {/* Description */}
           <div>
             <h3 className="font-semibold text-foreground">What this step is about:</h3>
-            <p>{staticGuidance?.description || step.description || "No description available."}</p>
+            <p>{step.description || "No description available."}</p>
           </div>
           
           {/* Why it Matters */}
           <div>
             <h3 className="font-semibold text-foreground">Why it matters:</h3>
-            <p>{staticGuidance?.why_matters || step.why_matters || "No context available."}</p>
+            <p>{step.why_matters || "No context available."}</p>
           </div>
           
           {/* Guiding Questions */}
           <div>
             <h3 className="font-semibold text-foreground">Guiding Questions:</h3>
-            {staticGuidance?.guiding_questions && staticGuidance.guiding_questions.length > 0 ? (
+            {guidingQuestions.length > 0 ? (
               <ul className="list-disc pl-5 space-y-1">
-                {staticGuidance.guiding_questions.map((question, index) => (
+                {guidingQuestions.map((question, index) => (
                   <li key={index}>{question}</li>
                 ))}
               </ul>
@@ -179,7 +178,7 @@ const StepWorkspace: React.FC = () => {
           <div>
             <h3 className="font-semibold text-foreground">Expected Output:</h3>
             <p className="font-medium text-primary">
-              {staticGuidance?.expected_output || 
+              {step.expected_output || 
                `A concise document outlining the key strategic decisions for "${step.step_name}".`}
             </p>
           </div>
