@@ -11,8 +11,9 @@ export type DocumentVersion = Database['public']['Tables']['document_versions'][
 export type AiReview = Database['public']['Tables']['ai_reviews']['Row'];
 export type Comment = Database['public']['Tables']['comments']['Row'];
 export type UserSettings = Database['public']['Tables']['user_settings']['Row'] & {
-  onboarding_tour_completed?: boolean; // Add this new field
+  onboarding_tour_completed?: boolean;
 };
+export type ProjectTemplate = Database['public']['Tables']['project_templates']['Row'];
 
 // Extend Document type to include step_embeddings for indexing status
 export type DocumentWithEmbedding = Document & {
