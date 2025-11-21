@@ -7,7 +7,11 @@ import { showError } from '@/utils/toast';
 import { useLocation } from 'react-router-dom';
 import { Skeleton } from '@/components/ui/skeleton';
 
-const ProjectList: React.FC = () => {
+interface ProjectListProps {
+  refreshTrigger?: number;
+}
+
+const ProjectList: React.FC<ProjectListProps> = ({ refreshTrigger = 0 }) => {
   const { user, isLoading: isSessionLoading } = useSession();
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoadingProjects, setIsLoadingProjects] = useState(true);
@@ -21,7 +25,9 @@ const ProjectList: React.FC = () => {
         return;
       }
 
-      setIsLoadingProjects(true);
+      // Only show loading skeleton on initial load or if explicitly desired
+      if (projects.length === 0) setIsLoadingProjects(true);
+      
       const { data, error } = await supabase
         .from('projects')
         .select('*')
@@ -40,7 +46,7 @@ const ProjectList: React.FC = () => {
     if (!isSessionLoading) {
       fetchProjects();
     }
-  }, [user, isSessionLoading]);
+  }, [user, isSessionLoading, refreshTrigger]);
 
   if (isLoadingProjects || isSessionLoading) {
     return (

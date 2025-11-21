@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Project } from '@/types/supabase';
 import { showError, showSuccess } from '@/utils/toast';
@@ -22,9 +22,15 @@ import {
 import EditProjectDialog from '@/components/projects/EditProjectDialog'; // Import the new dialog
 import { formatDateTime } from '@/utils/dateUtils'; // New import
 
+// Define context type to include refreshProjects
+type ProjectDetailsContext = {
+  refreshProjects?: () => void;
+};
+
 const ProjectDetails: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
+  const { refreshProjects } = useOutletContext<ProjectDetailsContext>(); // Access context
   const [project, setProject] = useState<Project | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -69,6 +75,8 @@ const ProjectDetails: React.FC = () => {
       showError(`Failed to delete project: ${error.message}`);
     } else {
       showSuccess('Project deleted successfully!');
+      // Trigger sidebar refresh
+      refreshProjects?.();
       navigate('/dashboard');
     }
     setIsDeleting(false);
@@ -163,7 +171,10 @@ const ProjectDetails: React.FC = () => {
           project={project}
           isOpen={isEditDialogOpen}
           onClose={() => setIsEditDialogOpen(false)}
-          onProjectUpdated={fetchProject} // Re-fetch project details after update
+          onProjectUpdated={() => {
+            fetchProject();
+            refreshProjects?.(); // Also refresh list on edit in case name changed
+          }}
         />
       )}
     </div>

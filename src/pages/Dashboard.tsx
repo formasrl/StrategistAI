@@ -37,6 +37,13 @@ const Dashboard = () => {
   const [activeStep, setActiveStep] = useState<Step | null>(null);
   const [activeDocument, setActiveDocument] = useState<Document | null>(null);
 
+  // State to trigger project list refresh
+  const [projectsRefreshTrigger, setProjectsRefreshTrigger] = useState(0);
+
+  const refreshProjects = useCallback(() => {
+    setProjectsRefreshTrigger((prev) => prev + 1);
+  }, []);
+
   useEffect(() => {
     if (!isLoading && !session) {
       navigate('/login');
@@ -218,6 +225,7 @@ const Dashboard = () => {
     setStepIdForAiPanel: setAiPanelStepId,
     aiReview: activeAiReview,
     isAiReviewLoading,
+    refreshProjects, // Expose refresh function to outlets
   };
 
   // Determine if the tour should run
@@ -241,7 +249,7 @@ const Dashboard = () => {
               />
             </div>
             <div className="flex-1 overflow-y-auto pr-2">
-              <ProjectList />
+              <ProjectList refreshTrigger={projectsRefreshTrigger} />
             </div>
             <div className="pt-4 border-t border-sidebar-border space-y-2 shrink-0">
               <Button onClick={() => navigate('/dashboard/profile')} className="w-full" variant="ghost">
