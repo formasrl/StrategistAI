@@ -5,6 +5,7 @@ import * as z from 'zod';
 import { supabase } from '@/integrations/supabase/client';
 import { useSession } from '@/integrations/supabase/SessionContextProvider';
 import { showError, showSuccess } from '@/utils/toast';
+import { useNavigate } from 'react-router-dom';
 import {
   Card,
   CardContent,
@@ -23,11 +24,9 @@ import {
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { UserSettings as UserSettingsType } from '@/types/supabase';
-import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Loader2, RefreshCcw } from 'lucide-react';
+import { Loader2, RefreshCcw, AlertTriangle, Database } from 'lucide-react';
 import { useTheme } from 'next-themes';
 
 const formSchema = z.object({
@@ -41,6 +40,7 @@ const formSchema = z.object({
 const UserSettings: React.FC = () => {
   const { user, isLoading: isSessionLoading } = useSession();
   const { setTheme } = useTheme();
+  const navigate = useNavigate();
   const [isLoadingSettings, setIsLoadingSettings] = useState(true);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
@@ -50,7 +50,7 @@ const UserSettings: React.FC = () => {
     resolver: zodResolver(formSchema),
     defaultValues: {
       openai_api_key: '',
-      preferred_model: 'gpt-4o-mini', // Default model must match backend Edge Function defaults
+      preferred_model: 'gpt-4o-mini',
       ai_enabled: true,
       theme: 'light',
       timezone: 'UTC',
@@ -59,7 +59,6 @@ const UserSettings: React.FC = () => {
 
   const openaiApiKey = form.watch('openai_api_key');
 
-  // Function to fetch OpenAI models
   const fetchOpenAIModels = useCallback(async (apiKey: string) => {
     if (!apiKey) {
       setAvailableModels([]);
@@ -68,8 +67,8 @@ const UserSettings: React.FC = () => {
     }
 
     setIsLoadingModels(true);
-    setAvailableModels([]); // Clear previous models
-    setHasFetchedInitialModels(true); // Mark that we've attempted to fetch models
+    setAvailableModels([]);
+    setHasFetchedInitialModels(true);
 
     try {
       const response = await fetch('https://api.openai.com/v1/models', {
@@ -91,7 +90,6 @@ const UserSettings: React.FC = () => {
         .sort();
 
       setAvailableModels(chatModels);
-      // If the preferred model is no longer available, or none is set, default to the first available or gpt-4o-mini
       if (form.getValues('preferred_model') && !chatModels.includes(form.getValues('preferred_model'))) {
         form.setValue('preferred_model', chatModels.length > 0 ? chatModels[0] : 'gpt-4o-mini');
       } else if (!form.getValues('preferred_model') && chatModels.length > 0) {
@@ -101,14 +99,12 @@ const UserSettings: React.FC = () => {
     } catch (error: any) {
       showError(`Error fetching OpenAI models: ${error.message}`);
       setAvailableModels([]);
-      form.setValue('preferred_model', 'gpt-4o-mini'); // Fallback to default
+      form.setValue('preferred_model', 'gpt-4o-mini');
     } finally {
       setIsLoadingModels(false);
     }
   }, [form]);
 
-
-  // Effect to fetch user settings from Supabase on initial load
   useEffect(() => {
     const fetchSettings = async () => {
       if (!user) {
@@ -128,12 +124,11 @@ const UserSettings: React.FC = () => {
       } else if (data) {
         form.reset({
           openai_api_key: data.openai_api_key || '',
-          preferred_model: data.preferred_model || 'gpt-4o-mini', // Default model must match backend Edge Function defaults
+          preferred_model: data.preferred_model || 'gpt-4o-mini',
           ai_enabled: data.ai_enabled ?? true,
           theme: (data.theme as 'light' | 'dark') || 'light',
           timezone: data.timezone || 'UTC',
         });
-        // Do NOT automatically fetch models here. Only on button press.
       }
       setIsLoadingSettings(false);
     };
@@ -168,9 +163,7 @@ const UserSettings: React.FC = () => {
       showError(`Failed to save settings: ${error.message}`);
     } else {
       showSuccess('Settings saved successfully!');
-      // Apply theme immediately after saving
       setTheme(values.theme);
-      // If API key was just updated, trigger model fetch
       if (values.openai_api_key && values.openai_api_key !== openaiApiKey && !hasFetchedInitialModels) {
         fetchOpenAIModels(values.openai_api_key);
       }
@@ -186,180 +179,192 @@ const UserSettings: React.FC = () => {
   }
 
   return (
-    <Card className="w-full max-w-2xl mx-auto">
-      <CardHeader>
-        <CardTitle className="text-2xl font-bold">User Settings</CardTitle>
-        <CardDescription>Manage your preferences for AI assistance and application display.</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-            <FormField
-              control={form.control}
-              name="ai_enabled"
-              render={({ field }) => (
-                <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
-                  <div className="space-y-0.5">
-                    <FormLabel className="text-base">Enable AI Features</FormLabel>
+    <div className="space-y-8 max-w-2xl mx-auto pb-10">
+      <Card className="w-full">
+        <CardHeader>
+          <CardTitle className="text-2xl font-bold">User Settings</CardTitle>
+          <CardDescription>Manage your preferences for AI assistance and application display.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+              <FormField
+                control={form.control}
+                name="ai_enabled"
+                render={({ field }) => (
+                  <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
+                    <div className="space-y-0.5">
+                      <FormLabel className="text-base">Enable AI Features</FormLabel>
+                      <FormDescription>
+                        Toggle AI assistance on or off for your projects.
+                      </FormDescription>
+                    </div>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="openai_api_key"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>OpenAI API Key (Optional)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="password"
+                        placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                        {...field}
+                      />
+                    </FormControl>
                     <FormDescription>
-                      Toggle AI assistance on or off for your projects.
+                      Provide your OpenAI API key to enable advanced AI features. This is stored securely.
                     </FormDescription>
-                  </div>
-                  <FormControl>
-                    <Switch
-                      checked={field.value}
-                      onCheckedChange={field.onChange}
-                    />
-                  </FormControl>
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={form.control}
-              name="openai_api_key"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>OpenAI API Key (Optional)</FormLabel>
-                  <FormControl>
-                    <Input
-                      type="password"
-                      placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                      {...field}
-                    />
-                  </FormControl>
-                  <FormDescription>
-                    Provide your OpenAI API key to enable advanced AI features. This is stored securely.
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={form.control}
-              name="preferred_model"
-              render={({ field }) => (
-                <FormItem>
-                  <div className="flex items-center justify-between">
-                    <FormLabel>Preferred AI Model</FormLabel>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => fetchOpenAIModels(openaiApiKey || '')}
-                      disabled={isLoadingModels || !openaiApiKey}
-                    >
-                      {isLoadingModels ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <RefreshCcw className="mr-2 h-4 w-4" />
-                      )}
-                      Update Models
-                    </Button>
-                  </div>
-                  <Select onValueChange={field.onChange} value={field.value} disabled={isLoadingModels || !openaiApiKey}>
-                    <FormControl>
-                      <SelectTrigger>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="preferred_model"
+                render={({ field }) => (
+                  <FormItem>
+                    <div className="flex items-center justify-between">
+                      <FormLabel>Preferred AI Model</FormLabel>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => fetchOpenAIModels(openaiApiKey || '')}
+                        disabled={isLoadingModels || !openaiApiKey}
+                      >
                         {isLoadingModels ? (
-                          <span className="flex items-center">
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading models...
-                          </span>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                         ) : (
-                          <SelectValue placeholder="Select a preferred AI model" />
+                          <RefreshCcw className="mr-2 h-4 w-4" />
                         )}
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {/* Always show the current value, even if availableModels is empty */}
-                      {!availableModels.includes(field.value || '') && field.value && (
-                         <SelectItem value={field.value} className="italic">
-                           {field.value} (Current)
-                         </SelectItem>
-                      )}
-                      {availableModels.length > 0 ? (
-                        availableModels.map((model) => (
-                          <SelectItem key={model} value={model}>
-                            {model}
-                          </SelectItem>
-                        ))
-                      ) : (
-                        // Only show default if no API key is provided or models haven't been fetched
-                        !openaiApiKey && !hasFetchedInitialModels && (
-                          <SelectItem value="gpt-4o-mini"> {/* Default model must match backend Edge Function defaults */}
-                            GPT-4o-mini (Default)
-                          </SelectItem>
-                        )
-                      )}
-                    </SelectContent>
-                  </Select>
-                  <FormDescription>
-                    Choose the OpenAI model you'd like to use for AI assistance. Click "Update Models" to fetch available models after entering your API key.
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+                        Update Models
+                      </Button>
+                    </div>
+                    <Select onValueChange={field.onChange} value={field.value} disabled={isLoadingModels || !openaiApiKey}>
+                      <FormControl>
+                        <SelectTrigger>
+                          {isLoadingModels ? (
+                            <span className="flex items-center">
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading models...
+                            </span>
+                          ) : (
+                            <SelectValue placeholder="Select a preferred AI model" />
+                          )}
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {!availableModels.includes(field.value || '') && field.value && (
+                           <SelectItem value={field.value} className="italic">
+                             {field.value} (Current)
+                           </SelectItem>
+                        )}
+                        {availableModels.length > 0 ? (
+                          availableModels.map((model) => (
+                            <SelectItem key={model} value={model}>
+                              {model}
+                            </SelectItem>
+                          ))
+                        ) : (
+                          !openaiApiKey && !hasFetchedInitialModels && (
+                            <SelectItem value="gpt-4o-mini">
+                              GPT-4o-mini (Default)
+                            </SelectItem>
+                          )
+                        )}
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>
+                      Choose the OpenAI model you'd like to use for AI assistance.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
-            {/* New Theme Setting */}
-            <FormField
-              control={form.control}
-              name="theme"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Application Theme</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value}>
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a theme" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      <SelectItem value="light">Light</SelectItem>
-                      <SelectItem value="dark">Dark</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <FormDescription>
-                    Choose between a light or dark theme for the application.
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+              <FormField
+                control={form.control}
+                name="theme"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Application Theme</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select a theme" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="light">Light</SelectItem>
+                        <SelectItem value="dark">Dark</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
-            {/* New Timezone Setting */}
-            <FormField
-              control={form.control}
-              name="timezone"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Preferred Timezone</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value}>
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select your timezone" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      <SelectItem value="UTC">UTC</SelectItem>
-                      <SelectItem value="America/New_York">America/New_York</SelectItem>
-                      <SelectItem value="Europe/London">Europe/London</SelectItem>
-                      <SelectItem value="Asia/Tokyo">Asia/Tokyo</SelectItem>
-                      <SelectItem value="Australia/Sydney">Australia/Sydney</SelectItem>
-                      {/* Add more timezones as needed */}
-                    </SelectContent>
-                  </Select>
-                  <FormDescription>
-                    Set your preferred timezone for date and time displays.
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+              <FormField
+                control={form.control}
+                name="timezone"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Preferred Timezone</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select your timezone" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="UTC">UTC</SelectItem>
+                        <SelectItem value="America/New_York">America/New_York</SelectItem>
+                        <SelectItem value="Europe/London">Europe/London</SelectItem>
+                        <SelectItem value="Asia/Tokyo">Asia/Tokyo</SelectItem>
+                        <SelectItem value="Australia/Sydney">Australia/Sydney</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
-            <Button type="submit">Save Settings</Button>
-          </form>
-        </Form>
-      </CardContent>
-    </Card>
+              <Button type="submit">Save Settings</Button>
+            </form>
+          </Form>
+        </CardContent>
+      </Card>
+
+      <Card className="w-full border-amber-200 dark:border-amber-900 bg-amber-50/50 dark:bg-amber-950/20">
+        <CardHeader>
+          <CardTitle className="text-lg font-semibold flex items-center gap-2 text-amber-700 dark:text-amber-500">
+            <Database className="h-5 w-5" /> Admin Actions
+          </CardTitle>
+          <CardDescription>
+            Advanced actions for system maintenance.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button 
+            variant="outline" 
+            className="w-full justify-start text-amber-700 dark:text-amber-500 border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/40"
+            onClick={() => navigate('/admin/migration')}
+          >
+            <AlertTriangle className="mr-2 h-4 w-4" />
+            Run Content Migration Tool
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
   );
 };
 
