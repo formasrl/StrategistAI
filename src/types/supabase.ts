@@ -4,6 +4,7 @@ export type Project = Database['public']['Tables']['projects']['Row'];
 export type Phase = Database['public']['Tables']['phases']['Row'];
 
 // Manually extending Step to ensure new columns are available even if types aren't regenerated
+// guiding_questions is JSONB in DB, but we treat it as string[] in the app
 export type Step = Database['public']['Tables']['steps']['Row'] & {
   guiding_questions?: string[] | null;
   expected_output?: string | null;
@@ -23,7 +24,7 @@ export type ProjectTemplate = {
   id: string;
   name: string;
   description: string | null;
-  structure: any; // Using any for the JSONB structure for flexibility
+  structure: any; // Using any for the JSONB structure to allow flexibility (it contains phases/steps tree)
   created_at: string | null;
 };
 
