@@ -32,3 +32,9 @@ export type ProjectTemplate = {
 export type DocumentWithEmbedding = Document & {
   step_embeddings?: Array<{ id: string }>;
 };
+
+// New types for the split template tables
+export type TemplatePhase = Database['public']['Tables']['template_phases']['Row'] & {
+  steps?: TemplateStep[]; // For local processing, not directly from DB
+};
+export type TemplateStep = Database['public']['Tables']['template_steps']['Row'];

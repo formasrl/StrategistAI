@@ -13,7 +13,8 @@ import DocumentEditor from "./pages/DocumentEditor";
 import UserSettings from "./pages/UserSettings";
 import Profile from "./pages/Profile";
 import StepWorkspace from "./pages/StepWorkspace";
-import AdminMigration from "./pages/AdminMigration"; // New import
+import AdminMigration from "./pages/AdminMigration";
+import AdminSplitMigration from "./pages/AdminSplitMigration"; // New import
 import { SessionContextProvider } from "./integrations/supabase/SessionContextProvider";
 import { ThemeProvider } from "next-themes";
 import AppSetupProvider from "./components/layout/AppSetupProvider";
@@ -33,8 +34,9 @@ const App = () => (
                 <Route path="/" element={<Index />} />
                 <Route path="/login" element={<Login />} />
                 <Route path="/project/new" element={<ProjectCreation />} />
-                {/* Admin Route */}
+                {/* Admin Routes */}
                 <Route path="/admin/migration" element={<AdminMigration />} />
+                <Route path="/admin/split-migration" element={<AdminSplitMigration />} />
                 
                 <Route path="/dashboard" element={<Dashboard />}>
                   <Route index element={
