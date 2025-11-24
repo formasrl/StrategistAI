@@ -19,26 +19,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Loader2 } from 'lucide-react';
-
-// Define the structure types for the template JSON
-interface TemplateStep {
-  step_number: number;
-  step_name: string;
-  description?: string;
-  why_matters?: string;
-  dependencies?: string[];
-  timeline?: string;
-  order_index: number;
-  guiding_questions?: string[];
-  expected_output?: string;
-}
-
-interface TemplatePhase {
-  phase_number: number;
-  phase_name: string;
-  description: string;
-  steps: TemplateStep[];
-}
+import { TemplatePhase, TemplateStep } from '@/types/supabase'; // Import new types
 
 const formSchema = z.object({
   name: z.string().min(1, { message: 'Project name is required.' }),
@@ -69,20 +50,30 @@ const NewProject: React.FC = () => {
     setIsSubmitting(true);
 
     try {
-      // 1. Fetch the "Standard Brand Strategy" template
-      const { data: templateData, error: templateError } = await supabase
+      // 1. Fetch the "Standard Brand Strategy" template to get its ID
+      const { data: projectTemplate, error: templateError } = await supabase
         .from('project_templates')
-        .select('*')
+        .select('id')
         .eq('name', 'Standard Brand Strategy')
         .single();
 
-      if (templateError || !templateData) {
+      if (templateError || !projectTemplate) {
         throw new Error('Standard project template not found. Please contact support or run migration.');
       }
 
-      const roadmapStructure = templateData.structure as unknown as TemplatePhase[];
+      // 2. Fetch template phases and their nested steps using the template_id
+      const { data: templatePhasesData, error: templatePhasesError } = await supabase
+        .from('template_phases')
+        .select('*, template_steps(*)') // Select phases and their nested steps
+        .eq('template_id', projectTemplate.id)
+        .order('phase_number', { ascending: true })
+        .order('order_index', { foreignTable: 'template_steps', ascending: true });
 
-      // 2. Insert the new project
+      if (templatePhasesError || !templatePhasesData || templatePhasesData.length === 0) {
+        throw new Error('No template phases found for the standard template. Please ensure migration has been run.');
+      }
+
+      // 3. Insert the new project
       const { data: projectData, error: projectError } = await supabase
         .from('projects')
         .insert({
@@ -98,39 +89,39 @@ const NewProject: React.FC = () => {
 
       const newProjectId = projectData.id;
 
-      // 3. Insert phases and their steps from the fetched template
-      for (const phase of roadmapStructure) {
-        const { data: phaseData, error: phaseError } = await supabase
+      // 4. Loop through the fetched TemplatePhases and insert them into the 'phases' table
+      for (const templatePhase of templatePhasesData) {
+        const { data: newPhase, error: insertPhaseError } = await supabase
           .from('phases')
           .insert({
             project_id: newProjectId,
-            phase_number: phase.phase_number,
-            phase_name: phase.phase_name,
-            description: phase.description,
+            phase_number: templatePhase.phase_number,
+            phase_name: templatePhase.phase_name,
+            description: templatePhase.description,
             status: 'not_started',
             completion_percentage: 0,
           })
-          .select()
+          .select('id')
           .single();
 
-        if (phaseError) throw phaseError;
+        if (insertPhaseError) throw insertPhaseError;
 
-        const newPhaseId = phaseData.id;
+        const newPhaseId = newPhase.id;
 
-        // Map template steps to DB columns
-        const stepsToInsert = phase.steps.map((step) => ({
+        // 5. Loop through the TemplateSteps associated with the current TemplatePhase
+        //    and insert them into the 'steps' table
+        const stepsToInsert = (templatePhase.template_steps || []).map((templateStep: TemplateStep) => ({
           phase_id: newPhaseId,
-          step_number: step.step_number,
-          step_name: step.step_name,
-          description: step.description || null,
-          why_matters: step.why_matters || null,
-          dependencies: step.dependencies ? JSON.stringify(step.dependencies) : '[]',
+          step_number: templateStep.step_number,
+          step_name: templateStep.step_name,
+          description: templateStep.description || null,
+          why_matters: templateStep.why_matters || null,
+          dependencies: templateStep.dependencies ? JSON.stringify(templateStep.dependencies) : '[]',
           status: 'not_started',
-          timeline: step.timeline || null,
-          order_index: step.order_index,
-          // Explicitly map content fields
-          guiding_questions: step.guiding_questions || null,
-          expected_output: step.expected_output || null,
+          timeline: templateStep.timeline || null,
+          order_index: templateStep.order_index,
+          guiding_questions: templateStep.guiding_questions ? JSON.stringify(templateStep.guiding_questions) : '[]',
+          expected_output: templateStep.expected_output || null,
         }));
 
         const { error: stepsError } = await supabase
