@@ -172,13 +172,7 @@ const StepWorkspace: React.FC = () => {
             )}
           </div>
 
-          {/* Expected Output */}
-          <div>
-            <h3 className="font-semibold text-foreground">Expected Output:</h3>
-            <p className="font-medium text-primary">
-              {step.expected_output}
-            </p>
-          </div>
+          {/* Removed Expected Output */}
         </CardContent>
       </Card>
 
