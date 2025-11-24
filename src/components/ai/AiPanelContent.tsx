@@ -1,14 +1,16 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Loader2, CheckCircle2, AlertCircle, AlertTriangle, Sparkles, RefreshCw } from 'lucide-react';
+import { Loader2, Sparkles, History, FileText } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
-import { useToast } from '@/hooks/use-toast';
+import { showError, showSuccess } from '@/utils/toast'; // Using consistent toast functions
 import { AiReview } from '@/types/supabase';
+import ReviewDialog from './ReviewDialog'; // New import
+import { formatDateTime } from '@/utils/dateUtils'; // New import
 
 interface AiPanelContentProps {
   documentId?: string;
@@ -16,217 +18,180 @@ interface AiPanelContentProps {
 }
 
 const AiPanelContent: React.FC<AiPanelContentProps> = ({ documentId, projectId }) => {
-  const [review, setReview] = useState<AiReview | null>(null);
+  const [reviews, setReviews] = useState<AiReview[]>([]); // Store all reviews
   const [isLoading, setIsLoading] = useState(false);
-  const { toast } = useToast();
+  const [isGeneratingReview, setIsGeneratingReview] = useState(false); // Separate state for generation
+  const [isReviewDialogOpen, setIsReviewDialogOpen] = useState(false);
+  const [selectedReview, setSelectedReview] = useState<AiReview | null>(null);
 
-  const fetchReview = async () => {
-    if (!documentId) return;
+  const fetchReviews = useCallback(async () => {
+    if (!documentId) {
+      setReviews([]);
+      return;
+    }
+    setIsLoading(true);
     try {
       const { data, error } = await supabase
         .from('ai_reviews')
         .select('*')
         .eq('document_id', documentId)
-        .maybeSingle();
+        .order('review_timestamp', { ascending: false }); // Order by latest first
 
       if (error) throw error;
-      if (data) setReview(data as AiReview);
-      else setReview(null);
-    } catch (error) {
-      console.error('Error fetching review:', error);
+      setReviews(data || []);
+    } catch (error: any) {
+      console.error('Error fetching reviews:', error);
+      showError(`Failed to load reviews: ${error.message}`);
+      setReviews([]);
+    } finally {
+      setIsLoading(false);
     }
-  };
+  }, [documentId]);
 
   useEffect(() => {
-    fetchReview();
-  }, [documentId]);
+    fetchReviews();
+  }, [fetchReviews]);
 
   const handleGenerateReview = async () => {
     if (!documentId) return;
-    setIsLoading(true);
+    setIsGeneratingReview(true);
     try {
-      const { data, error } = await supabase.functions.invoke('generate-review', {
+      const { data, error } = await supabase.functions.invoke('generate-ai-review', {
         body: { documentId, projectId }
       });
 
       if (error) throw error;
       
-      setReview(data);
-      toast({
-        title: "Review Generated",
-        description: "AI has analyzed your document.",
-      });
-    } catch (error) {
+      const newReview = data.review as AiReview; // The edge function now returns the full new review
+      setReviews(prev => [newReview, ...prev]); // Add new review to the top of the list
+      setSelectedReview(newReview); // Select the new review to open in dialog
+      setIsReviewDialogOpen(true); // Open the dialog
+      showSuccess("AI has analyzed your document.");
+    } catch (error: any) {
       console.error('Error generating review:', error);
-      toast({
-        title: "Error",
-        description: "Failed to generate review. Please try again.",
-        variant: "destructive",
-      });
+      showError(`Failed to generate review: ${error.message}`);
     } finally {
-      setIsLoading(false);
+      setIsGeneratingReview(false);
     }
+  };
+
+  const handleOpenReview = (review: AiReview) => {
+    setSelectedReview(review);
+    setIsReviewDialogOpen(true);
   };
 
   if (!documentId) {
     return (
       <div className="flex flex-col items-center justify-center h-full p-8 text-center text-muted-foreground">
-        <AlertCircle className="h-12 w-12 mb-4 opacity-50" />
+        <FileText className="h-12 w-12 mb-4 opacity-50" />
         <p>Select a document to generate an AI review.</p>
       </div>
     );
   }
 
+  const latestReview = reviews[0]; // The most recent review
+
   return (
     <div className="space-y-6 p-4 pb-8">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between" id="tour-generate-review">
         <h3 className="font-semibold text-lg">AI Review</h3>
         <Button 
           onClick={handleGenerateReview} 
-          disabled={isLoading} 
+          disabled={isGeneratingReview} 
           size="sm"
-          variant={review ? "outline" : "default"}
+          variant={latestReview ? "outline" : "default"}
         >
-          {isLoading ? (
+          {isGeneratingReview ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               Analyzing...
             </>
           ) : (
             <>
-              {review ? <RefreshCw className="mr-2 h-4 w-4" /> : <Sparkles className="mr-2 h-4 w-4" />}
-              {review ? 'Re-evaluate' : 'Generate Review'}
+              <Sparkles className="mr-2 h-4 w-4" />
+              {latestReview ? 'Re-evaluate' : 'Generate Review'}
             </>
           )}
         </Button>
       </div>
 
-      {review ? (
-        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-          {/* Readiness Status */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium flex items-center justify-between">
-                Status
-                <Badge 
-                  variant={
-                    review.readiness === 'ready' ? 'default' : 
-                    review.readiness === 'review_needed' ? 'secondary' : 'outline'
-                  }
-                  className={review.readiness === 'ready' ? 'bg-green-600' : ''}
-                >
-                  {review.readiness?.replace('_', ' ').toUpperCase() || 'DRAFT'}
-                </Badge>
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground">{review.readiness_reason}</p>
-            </CardContent>
-          </Card>
-
-          {/* Summary */}
-          <div className="space-y-2">
-            <h4 className="text-sm font-semibold flex items-center gap-2">
-              Summary
-            </h4>
-            <p className="text-sm text-muted-foreground bg-muted/50 p-3 rounded-md">
-              {review.summary}
-            </p>
-          </div>
-
-          {/* Strengths */}
-          {review.strengths && (review.strengths as string[]).length > 0 && (
-            <div className="space-y-2">
-              <h4 className="text-sm font-semibold text-green-600 flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4" /> Strengths
-              </h4>
-              <ul className="space-y-1">
-                {(review.strengths as string[]).map((item, i) => (
-                  <li key={i} className="text-sm text-muted-foreground pl-6 relative before:absolute before:left-2 before:top-2 before:w-1 before:h-1 before:bg-green-500 before:rounded-full">
-                    {item}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* Suggestions */}
-          {review.suggestions && (review.suggestions as string[]).length > 0 && (
-            <div className="space-y-2">
-              <h4 className="text-sm font-semibold text-blue-600 flex items-center gap-2">
-                <Sparkles className="h-4 w-4" /> Suggestions
-              </h4>
-              <ul className="space-y-1">
-                {(review.suggestions as string[]).map((item, i) => (
-                  <li key={i} className="text-sm text-muted-foreground pl-6 relative before:absolute before:left-2 before:top-2 before:w-1 before:h-1 before:bg-blue-500 before:rounded-full">
-                    {item}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* Issues */}
-          {review.issues && (review.issues as string[]).length > 0 && (
-            <div className="space-y-2">
-              <h4 className="text-sm font-semibold text-red-600 flex items-center gap-2">
-                <AlertCircle className="h-4 w-4" /> Issues
-              </h4>
-              <ul className="space-y-1">
-                {(review.issues as string[]).map((item, i) => (
-                  <li key={i} className="text-sm text-muted-foreground pl-6 relative before:absolute before:left-2 before:top-2 before:w-1 before:h-1 before:bg-red-500 before:rounded-full">
-                    {item}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* Consistency */}
-          {review.consistency_issues && (review.consistency_issues as string[]).length > 0 && (
-            <div className="space-y-2">
-              <h4 className="text-sm font-semibold text-amber-600 flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4" /> Consistency
-              </h4>
-              <ul className="space-y-1">
-                {(review.consistency_issues as string[]).map((item, i) => (
-                  <li key={i} className="text-sm text-muted-foreground pl-6 relative before:absolute before:left-2 before:top-2 before:w-1 before:h-1 before:bg-amber-500 before:rounded-full">
-                    {item}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+      {isLoading ? (
+        <div className="space-y-4">
+          <div className="h-24 w-full bg-muted animate-pulse rounded-md"></div>
+          <div className="h-16 w-full bg-muted animate-pulse rounded-md"></div>
         </div>
       ) : (
-        <div className="text-center py-12 text-muted-foreground">
-          <Brain className="h-12 w-12 mx-auto mb-4 opacity-20" />
-          <p>No review generated yet.</p>
-          <p className="text-sm">Click generate to analyze this document.</p>
-        </div>
+        <>
+          {latestReview ? (
+            <Card className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium flex items-center justify-between">
+                  Latest Review
+                  <Badge 
+                    variant={
+                      latestReview.readiness === 'ready' ? 'default' : 
+                      latestReview.readiness === 'not_ready' ? 'secondary' : 'outline'
+                    }
+                    className={latestReview.readiness === 'ready' ? 'bg-green-600' : ''}
+                  >
+                    {latestReview.readiness?.replace('_', ' ').toUpperCase() || 'DRAFT'}
+                  </Badge>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <p className="text-sm text-muted-foreground line-clamp-3">
+                  {latestReview.summary}
+                </p>
+                <Button variant="link" className="p-0 h-auto text-sm" onClick={() => handleOpenReview(latestReview)}>
+                  View Full Review
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="text-center py-12 text-muted-foreground">
+              <Sparkles className="h-12 w-12 mx-auto mb-4 opacity-20" />
+              <p>No review generated yet.</p>
+              <p className="text-sm">Click "Generate Review" to analyze this document.</p>
+            </div>
+          )}
+
+          {reviews.length > 1 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <History className="h-4 w-4 text-muted-foreground" /> Review History
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ScrollArea className="h-48">
+                  <div className="space-y-2">
+                    {reviews.slice(1).map((reviewItem) => ( // Exclude the latest review
+                      <div key={reviewItem.id} className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">
+                          {formatDateTime(reviewItem.review_timestamp, 'MMM d, yyyy HH:mm')}
+                        </span>
+                        <Button variant="link" className="p-0 h-auto text-sm" onClick={() => handleOpenReview(reviewItem)}>
+                          View Review
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              </CardContent>
+            </Card>
+          )}
+        </>
+      )}
+
+      {selectedReview && (
+        <ReviewDialog
+          isOpen={isReviewDialogOpen}
+          onClose={() => setIsReviewDialogOpen(false)}
+          review={selectedReview}
+        />
       )}
     </div>
   );
 };
-
-function Brain(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg
-      {...props}
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z" />
-      <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z" />
-    </svg>
-  )
-}
 
 export default AiPanelContent;

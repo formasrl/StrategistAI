@@ -8,7 +8,7 @@ import { showSuccess, showError } from '@/utils/toast';
 import ProjectList from '@/components/projects/ProjectList';
 import { PlusCircle, Settings, LogOut, UserCircle2 } from 'lucide-react';
 import AiPanel from '@/components/ai/AiPanel';
-import { AiReview, Project, Phase, Step, Document } from '@/types/supabase';
+import { Project, Phase, Step, Document } from '@/types/supabase';
 import CurrentContextDisplay from '@/components/layout/CurrentContextDisplay';
 import OnboardingTour from '@/components/onboarding/OnboardingTour'; // Import OnboardingTour
 import { useAppSetup } from '@/components/layout/AppSetupProvider'; // Import useAppSetup
@@ -28,9 +28,6 @@ const Dashboard = () => {
   const [aiPanelDocumentId, setAiPanelDocumentId] = useState<string | undefined>(documentId);
   const [aiPanelStepId, setAiPanelStepId] = useState<string | undefined>(stepId);
   const [aiPanelPhaseId, setAiPanelPhaseId] = useState<string | undefined>(undefined);
-
-  const [activeAiReview, setActiveAiReview] = useState<AiReview | null>(null);
-  const [isAiReviewLoading, setIsAiReviewLoading] = useState(false);
 
   const [activeProject, setActiveProject] = useState<Project | null>(null);
   const [activePhase, setActivePhase] = useState<Phase | null>(null);
@@ -54,6 +51,29 @@ const Dashboard = () => {
     setAiPanelDocumentId(documentId);
     setAiPanelStepId(stepId);
   }, [documentId, stepId]);
+
+  useEffect(() => {
+    if (aiPanelStepId) {
+      const fetchPhaseId = async () => {
+        const { data, error } = await supabase
+          .from('steps')
+          .select('phase_id')
+          .eq('id', aiPanelStepId)
+          .single();
+
+        if (error) {
+          console.error('Error fetching phaseId for AI panel:', error);
+          setAiPanelPhaseId(undefined);
+        } else {
+          setAiPanelPhaseId(data.phase_id);
+        }
+      };
+
+      fetchPhaseId();
+    } else {
+      setAiPanelPhaseId(undefined);
+    }
+  }, [aiPanelStepId]);
 
   useEffect(() => {
     const fetchActiveContext = async () => {
@@ -123,86 +143,6 @@ const Dashboard = () => {
     fetchActiveContext();
   }, [projectId, stepId, documentId]);
 
-  useEffect(() => {
-    if (aiPanelStepId) {
-      const fetchPhaseId = async () => {
-        const { data, error } = await supabase
-          .from('steps')
-          .select('phase_id')
-          .eq('id', aiPanelStepId)
-          .single();
-
-        if (error) {
-          console.error('Error fetching phaseId for AI panel:', error);
-          setAiPanelPhaseId(undefined);
-        } else {
-          setAiPanelPhaseId(data.phase_id);
-        }
-      };
-
-      fetchPhaseId();
-    } else {
-      setAiPanelPhaseId(undefined);
-    }
-  }, [aiPanelStepId]);
-
-  const fetchLatestAiReview = useCallback(async (docId: string) => {
-    setIsAiReviewLoading(true);
-    const { data: reviewData, error: reviewError } = await supabase
-      .from('ai_reviews')
-      .select('*')
-      .eq('document_id', docId)
-      .order('review_timestamp', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (reviewError && reviewError.code !== 'PGRST116') {
-      console.error('Error fetching AI review:', reviewError);
-      setActiveAiReview(null);
-      showError(`Failed to load AI review: ${reviewError.message}`);
-    } else if (reviewData) {
-      setActiveAiReview(reviewData);
-    } else {
-      setActiveAiReview(null);
-    }
-
-    setIsAiReviewLoading(false);
-  }, []);
-
-  const handleGenerateAiReviewFromPanel = useCallback(
-    async (docId: string) => {
-      if (!docId || isAiReviewLoading) return;
-
-      setIsAiReviewLoading(true);
-      const { error } = await supabase.functions.invoke('generate-ai-review', {
-        body: { documentId: docId },
-        headers: {
-          Authorization: `Bearer ${session?.access_token}`,
-        },
-      });
-
-      if (error) {
-        showError(`AI review failed: ${error.message}`);
-        setActiveAiReview(null);
-      } else {
-        showSuccess('AI review generated successfully!');
-        await fetchLatestAiReview(docId);
-      }
-
-      setIsAiReviewLoading(false);
-    },
-    [isAiReviewLoading, fetchLatestAiReview, session?.access_token]
-  );
-
-  useEffect(() => {
-    if (aiPanelDocumentId) {
-      fetchLatestAiReview(aiPanelDocumentId);
-    } else {
-      setActiveAiReview(null);
-      setIsAiReviewLoading(false);
-    }
-  }, [aiPanelDocumentId, fetchLatestAiReview]);
-
   if (isLoading) {
     return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
   }
@@ -219,12 +159,8 @@ const Dashboard = () => {
   };
 
   const outletContextValue = {
-    setAiReview: setActiveAiReview,
-    setIsAiReviewLoading: setIsAiReviewLoading,
     setDocumentIdForAiPanel: setAiPanelDocumentId,
     setStepIdForAiPanel: setAiPanelStepId,
-    aiReview: activeAiReview,
-    isAiReviewLoading,
     refreshProjects, // Expose refresh function to outlets
   };
 
@@ -271,9 +207,6 @@ const Dashboard = () => {
             phaseId={aiPanelPhaseId}
             stepId={aiPanelStepId}
             documentId={aiPanelDocumentId}
-            aiReview={activeAiReview}
-            isAiReviewLoading={isAiReviewLoading}
-            onGenerateReview={handleGenerateAiReviewFromPanel}
           />
         }
       />

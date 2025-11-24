@@ -302,8 +302,7 @@ serve(async (req) => {
 
     const normalized = normalizeReview(parsedReview);
 
-    await supabaseClient.from("ai_reviews").delete().eq("document_id", documentId ?? "");
-
+    // Changed from upsert to insert to keep a history of reviews
     const insertPayload = {
       document_id: documentId ?? null,
       strengths: normalized.strengths,
@@ -316,7 +315,7 @@ serve(async (req) => {
       review_timestamp: new Date().toISOString(),
     };
 
-    const { error: insertError } = await supabaseClient.from("ai_reviews").insert(insertPayload);
+    const { data: newReview, error: insertError } = await supabaseClient.from("ai_reviews").insert(insertPayload).select().single();
     if (insertError) {
       console.error("Failed to store review", insertError);
       return respond({ error: "Failed to store AI review." }, 500);
@@ -324,6 +323,7 @@ serve(async (req) => {
 
     return respond({
       review: {
+        id: newReview.id, // Return the ID of the new review
         summary: normalized.summary,
         strengths: normalized.strengths,
         issues: normalized.issues,
@@ -331,6 +331,8 @@ serve(async (req) => {
         suggestions: normalized.suggestions,
         readiness: normalized.readiness,
         readiness_reason: normalized.readinessReason,
+        review_timestamp: newReview.review_timestamp,
+        document_id: newReview.document_id,
       },
     });
   } catch (error) {

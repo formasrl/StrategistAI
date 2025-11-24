@@ -3,7 +3,6 @@
 import React from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import AiChatbot from './AiChatbot';
-import { AiReview } from '@/types/supabase';
 import { Brain, MessageCircle } from 'lucide-react';
 import AiPanelContent from './AiPanelContent';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -13,10 +12,6 @@ interface AiPanelProps {
   phaseId?: string;
   stepId?: string;
   documentId?: string;
-  // Making these optional as we are moving logic to AiPanelContent
-  aiReview?: AiReview | null;
-  isAiReviewLoading?: boolean;
-  onGenerateReview?: (docId: string) => void;
 }
 
 const AiPanel: React.FC<AiPanelProps> = ({
