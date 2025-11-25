@@ -107,12 +107,14 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Auto-scroll as messages change
   useEffect(() => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
   }, [messages, isSending, uploadedFiles]);
 
+  // Helper: load all messages for a session
   const fetchMessagesForSession = useCallback(async (sessionId: string) => {
     const { data: messagesData, error: messagesError } = await supabase
       .from('chat_messages')
@@ -138,7 +140,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
             displayContent = displayContent.replace(jsonBlockMatch[0], '').trim();
           }
         } catch {
-          // ignore
+          // ignore parsing failures
         }
       }
 
@@ -163,6 +165,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
     });
   }, []);
 
+  // Initial load: sessions + possibly restore last active session
   useEffect(() => {
     let isMounted = true;
 
@@ -201,21 +204,23 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
         } else if (sessionsData && isMounted) {
           setAvailableChatSessions(sessionsData);
 
-          let sessionToLoadId: string | undefined;
-          const lastActiveChat = getLastActiveChatSession(projectId, stepId, documentId);
+          if (sessionsData.length > 0) {
+            let sessionToLoadId: string | undefined;
+            const lastActiveChat = getLastActiveChatSession(projectId, stepId, documentId);
 
-          if (lastActiveChat && sessionsData.some((s) => s.id === lastActiveChat)) {
-            sessionToLoadId = lastActiveChat;
-          } else if (sessionsData.length > 0) {
-            sessionToLoadId = sessionsData[0].id;
-          }
+            if (lastActiveChat && sessionsData.some((s) => s.id === lastActiveChat)) {
+              sessionToLoadId = lastActiveChat;
+            } else {
+              sessionToLoadId = sessionsData[0].id;
+            }
 
-          if (sessionToLoadId) {
-            setSelectedChatSessionId(sessionToLoadId);
-            setCurrentChatSessionId(sessionToLoadId);
-            saveLastActiveChatSession(projectId, stepId, documentId, sessionToLoadId);
-            const loadedMessages = await fetchMessagesForSession(sessionToLoadId);
-            if (isMounted) setMessages(loadedMessages);
+            if (sessionToLoadId) {
+              setSelectedChatSessionId(sessionToLoadId);
+              setCurrentChatSessionId(sessionToLoadId);
+              saveLastActiveChatSession(projectId, stepId, documentId, sessionToLoadId);
+              const loadedMessages = await fetchMessagesForSession(sessionToLoadId);
+              if (isMounted) setMessages(loadedMessages);
+            }
           }
         }
       } catch (err) {
@@ -254,6 +259,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
     [selectedChatSessionId, projectId, stepId, documentId, fetchMessagesForSession],
   );
 
+  // Subscribe for realtime messages in active session
   useEffect(() => {
     if (!currentChatSessionId) return;
 
@@ -412,6 +418,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
   };
 
   const handleNewChat = () => {
+    // Start a fresh conversation locally (server will create a session on first send)
     setMessages([]);
     setCurrentChatSessionId(undefined);
     setSelectedChatSessionId(undefined);
@@ -607,9 +614,10 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
     showSuccess('Content sent to editor. Check the document editor panel!');
   };
 
+  // Shift+Enter => newline, Enter => send
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && e.shiftKey) {
-      return;
+      return; // allow native newline
     }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -617,8 +625,14 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
     }
   };
 
+  // Input should be visible if:
+  // - we already have a chat session, OR
+  // - the user has started typing, OR
+  // - there are files attached.
   const hasActiveComposer =
     !!currentChatSessionId || inputMessage.trim().length > 0 || uploadedFiles.length > 0;
+
+  const hasAnySession = availableChatSessions.length > 0;
 
   return (
     <Card className="flex flex-col h-full border-none shadow-none bg-transparent">
@@ -663,6 +677,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
 
       <CardContent className="flex-1 p-0 overflow-hidden relative bg-background/50">
         <ScrollArea className="h-full p-4">
+          {/* History only when toggled open */}
           <Collapsible
             open={!isHistoryCollapsed}
             onOpenChange={setIsHistoryCollapsed}
@@ -673,7 +688,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
                 <div className="text-center text-muted-foreground py-4">
                   Loading sessions...
                 </div>
-              ) : availableChatSessions.length > 0 ? (
+              ) : hasAnySession ? (
                 <div className="space-y-2">
                   {availableChatSessions.map((sessionItem) => (
                     <div
@@ -733,15 +748,34 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
           </Collapsible>
 
           <div className="space-y-6 pb-4 min-h-[200px]">
-            {!isLoadingHistory && messages.length === 0 && (
-              <div className="flex flex-col items-center justify-center h-[300px] text-center text-muted-foreground px-8">
-                <Bot className="h-12 w-12 mb-3 opacity-20" />
-                <p>Ask StrategistAI about your project.</p>
-                <p className="text-sm mt-2">
-                  Upload files (PDF, DOCX, MD) to get analysis.
-                </p>
-              </div>
-            )}
+            {/* Empty-state: no sessions and no messages -> show big Start New Chat button */}
+            {!isLoadingHistory &&
+              !hasAnySession &&
+              messages.length === 0 && (
+                <div className="flex flex-col items-center justify-center h-[300px] text-center text-muted-foreground px-8">
+                  <Bot className="h-12 w-12 mb-3 opacity-20" />
+                  <p className="mb-3">
+                    Start a conversation with StrategistAI about this project.
+                  </p>
+                  <Button onClick={handleNewChat}>
+                    <PlusCircle className="mr-2 h-4 w-4" />
+                    Start New Chat
+                  </Button>
+                </div>
+              )}
+
+            {/* Standard blank state when there is some context (e.g., step / doc) but no messages yet */}
+            {!isLoadingHistory &&
+              (hasAnySession || messages.length > 0) &&
+              messages.length === 0 && (
+                <div className="flex flex-col items-center justify-center h-[300px] text-center text-muted-foreground px-8">
+                  <Bot className="h-12 w-12 mb-3 opacity-20" />
+                  <p>Ask StrategistAI about your project.</p>
+                  <p className="text-sm mt-2">
+                    Upload files (PDF, DOCX, MD) to get analysis.
+                  </p>
+                </div>
+              )}
 
             {messages.map((msg) => (
               <div
@@ -831,6 +865,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
         </ScrollArea>
       </CardContent>
 
+      {/* Attached files preview */}
       {uploadedFiles.length > 0 && (
         <div className="px-4 py-2 bg-background border-t border-border flex flex-wrap gap-2 max-h-24 overflow-y-auto">
           {uploadedFiles.map((file, index) => (
@@ -849,6 +884,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
         </div>
       )}
 
+      {/* Input area — visible only when there's some active composing context */}
       {hasActiveComposer && (
         <CardFooter className="p-4 pt-2 border-t border-border bg-background">
           <form onSubmit={handleSendMessage} className="flex w-full gap-2 items-end">
