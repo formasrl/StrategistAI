@@ -1,8 +1,8 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { MessageCircle, Send, Loader2, Bot, User, BookOpen, RefreshCw, ChevronDown, Paperclip, PlusCircle, X } from 'lucide-react';
+import { MessageCircle, Send, Loader2, Bot, User, BookOpen, RefreshCw, ChevronDown, Paperclip, PlusCircle, X, History as HistoryIcon } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { supabase } from '@/integrations/supabase/client';
 import { useSession } from '@/integrations/supabase/SessionContextProvider';
@@ -46,6 +46,12 @@ interface ChatMessage {
   uploadedFiles?: string[]; // New: array of file names
 }
 
+interface ChatSession {
+  id: string;
+  created_at: string;
+  updated_at: string;
+}
+
 interface AiChatbotProps {
   projectId?: string;
   phaseId?: string;
@@ -69,6 +75,11 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
   const [currentChatSessionId, setCurrentChatSessionId] = useState<string | undefined>(undefined);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
 
+  const [availableChatSessions, setAvailableChatSessions] = useState<ChatSession[]>([]);
+  const [selectedChatSessionId, setSelectedChatSessionId] = useState<string | undefined>(undefined);
+  const [isLoadingSessions, setIsLoadingSessions] = useState(false);
+  const [isHistoryCollapsed, setIsHistoryCollapsed] = useState(true);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -79,28 +90,79 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
     }
   }, [messages, isSending, uploadedFiles]);
 
+  // Helper to fetch messages for a given session ID
+  const fetchMessagesForSession = useCallback(async (sessionId: string) => {
+    const { data: messagesData, error: messagesError } = await supabase
+      .from('chat_messages')
+      .select('*')
+      .eq('chat_session_id', sessionId)
+      .order('created_at', { ascending: true });
+
+    if (messagesError) {
+      console.error('Error fetching messages for session:', messagesError);
+      return [];
+    }
+
+    return messagesData.map(msg => {
+      let insertContent: string | undefined;
+      let displayContent = msg.content || '';
+      const jsonBlockMatch = displayContent.match(/```json\n?({[\s\S]*?})\n?```/);
+      if (jsonBlockMatch && jsonBlockMatch[1]) {
+        try {
+          const parsed = JSON.parse(jsonBlockMatch[1]);
+          if (typeof parsed.insert_content === 'string') {
+            insertContent = parsed.insert_content;
+            displayContent = displayContent.replace(jsonBlockMatch[0], '').trim();
+          }
+        } catch (e) {
+          // ignore parsing error
+        }
+      }
+
+      let fileNames: string[] = [];
+      const fileMatch = msg.content.match(/\(Files?: ([^)]+)\)/);
+      if (fileMatch) {
+        fileNames = fileMatch[1].split(',').map(s => s.trim());
+      } else if (msg.content.match(/^\(File: .+\)/)) {
+         const legacyMatch = msg.content.match(/^\(File: (.+?)\)/);
+         if (legacyMatch) fileNames = [legacyMatch[1]];
+      }
+
+      return {
+        id: msg.id,
+        sender: msg.role === 'user' ? 'user' : 'ai',
+        text: displayContent,
+        timestamp: msg.created_at,
+        sources: [], 
+        insertContent: insertContent,
+        uploadedFiles: fileNames.length > 0 ? fileNames : undefined,
+      };
+    });
+  }, []);
+
   // 2. Fetch History & Determine Session ID
   useEffect(() => {
     let isMounted = true;
 
-    const fetchHistory = async () => {
+    const fetchSessionsAndHistory = async () => {
       if (!projectId) return;
       
       if (isMounted) {
         setIsLoadingHistory(true);
+        setIsLoadingSessions(true);
         setMessages([]);
+        setAvailableChatSessions([]);
         setCurrentChatSessionId(undefined);
+        setSelectedChatSessionId(undefined);
         setUploadedFiles([]);
       }
 
       try {
-        // Resolve Session ID based on context
         let query = supabase
           .from('chat_sessions')
-          .select('id')
+          .select('id, created_at, updated_at')
           .eq('project_id', projectId)
-          .order('updated_at', { ascending: false })
-          .limit(1);
+          .order('updated_at', { ascending: false });
 
         if (documentId) {
           query = query.eq('document_id', documentId);
@@ -110,72 +172,48 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
           query = query.is('step_id', null).is('document_id', null);
         }
 
-        const { data: sessionData, error: sessionError } = await query.maybeSingle();
+        const { data: sessionsData, error: sessionsError } = await query;
 
-        if (sessionError) {
-          console.error('Error fetching chat session:', sessionError);
-        } else if (sessionData && isMounted) {
-          setCurrentChatSessionId(sessionData.id);
-
-          // Fetch messages for this session
-          const { data: messagesData, error: messagesError } = await supabase
-            .from('chat_messages')
-            .select('*')
-            .eq('chat_session_id', sessionData.id)
-            .order('created_at', { ascending: true });
-
-          if (messagesData && isMounted) {
-            setMessages(messagesData.map(msg => {
-              // Attempt to parse insertContent from historic messages
-              let insertContent: string | undefined;
-              let displayContent = msg.content || '';
-              const jsonBlockMatch = displayContent.match(/```json\n?({[\s\S]*?})\n?```/);
-              if (jsonBlockMatch && jsonBlockMatch[1]) {
-                try {
-                  const parsed = JSON.parse(jsonBlockMatch[1]);
-                  if (typeof parsed.insert_content === 'string') {
-                    insertContent = parsed.insert_content;
-                    displayContent = displayContent.replace(jsonBlockMatch[0], '').trim();
-                  }
-                } catch (e) {
-                  // ignore parsing error
-                }
-              }
-
-              // Heuristic to find file names in old messages (backward compat)
-              let fileNames: string[] = [];
-              const fileMatch = msg.content.match(/\(Files?: ([^)]+)\)/);
-              if (fileMatch) {
-                fileNames = fileMatch[1].split(',').map(s => s.trim());
-              } else if (msg.content.match(/^\(File: .+\)/)) {
-                 // Legacy format check
-                 const legacyMatch = msg.content.match(/^\(File: (.+?)\)/);
-                 if (legacyMatch) fileNames = [legacyMatch[1]];
-              }
-
-              return {
-                id: msg.id,
-                sender: msg.role === 'user' ? 'user' : 'ai',
-                text: displayContent,
-                timestamp: msg.created_at,
-                sources: [], 
-                insertContent: insertContent,
-                uploadedFiles: fileNames.length > 0 ? fileNames : undefined,
-              };
-            }));
+        if (sessionsError) {
+          console.error('Error fetching chat sessions:', sessionsError);
+        } else if (sessionsData && isMounted) {
+          setAvailableChatSessions(sessionsData);
+          const latestSession = sessionsData[0];
+          if (latestSession) {
+            setSelectedChatSessionId(latestSession.id);
+            setCurrentChatSessionId(latestSession.id);
+            const loadedMessages = await fetchMessagesForSession(latestSession.id);
+            if (isMounted) setMessages(loadedMessages);
           }
         }
       } catch (err) {
         console.error('Failed to initialize chat:', err);
       } finally {
-        if (isMounted) setIsLoadingHistory(false);
+        if (isMounted) {
+          setIsLoadingHistory(false);
+          setIsLoadingSessions(false);
+        }
       }
     };
 
-    fetchHistory();
+    fetchSessionsAndHistory();
 
     return () => { isMounted = false; };
-  }, [projectId, stepId, documentId]);
+  }, [projectId, stepId, documentId, fetchMessagesForSession]);
+
+  // Handle session selection from history
+  const handleSelectSession = useCallback(async (sessionId: string) => {
+    if (sessionId === selectedChatSessionId) return; // Already selected
+
+    setIsLoadingHistory(true);
+    setSelectedChatSessionId(sessionId);
+    setCurrentChatSessionId(sessionId);
+    setUploadedFiles([]); // Clear files when switching sessions
+    const loadedMessages = await fetchMessagesForSession(sessionId);
+    setMessages(loadedMessages);
+    setIsLoadingHistory(false);
+    setIsHistoryCollapsed(true); // Collapse history after selection
+  }, [selectedChatSessionId, fetchMessagesForSession]);
 
   // 3. Realtime Subscription
   useEffect(() => {
@@ -212,7 +250,6 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
               }
             }
 
-            // Parse files for display
             let fileNames: string[] = [];
             const fileMatch = newMsg.content.match(/\(Files?: ([^)]+)\)/);
             if (fileMatch) {
@@ -253,8 +290,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
     setIsSending(true);
 
     const currentFiles = [...uploadedFiles];
-    // Clear files immediately from UI for next message
-    setUploadedFiles([]);
+    setUploadedFiles([]); // Clear files immediately from UI for next message
 
     const tempUserMsgId = crypto.randomUUID();
     let userMsgText = text;
@@ -301,6 +337,16 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
       
       if (data.chatSessionId && !currentChatSessionId) {
         setCurrentChatSessionId(data.chatSessionId);
+        setSelectedChatSessionId(data.chatSessionId); // Select the new session
+        // Re-fetch sessions to include the new one in the list
+        const { data: updatedSessions, error: updateError } = await supabase
+          .from('chat_sessions')
+          .select('id, created_at, updated_at')
+          .eq('project_id', projectId)
+          .order('updated_at', { ascending: false });
+        if (!updateError && updatedSessions) {
+          setAvailableChatSessions(updatedSessions);
+        }
       }
 
       setMessages(prev => [...prev, {
@@ -323,8 +369,11 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
   const handleNewChat = () => {
     setMessages([]);
     setCurrentChatSessionId(undefined);
+    setSelectedChatSessionId(undefined);
     setInputMessage('');
     setUploadedFiles([]);
+    setIsHistoryCollapsed(true); // Collapse history when starting new chat
+    showSuccess('New chat session started.');
   };
 
   const renderMessageContent = (text: string) => {
@@ -473,20 +522,61 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
           <MessageCircle className="h-5 w-5 text-blue-500" />
           <span className="truncate">{getContextTitle()}</span>
         </CardTitle>
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" onClick={handleNewChat} className="h-8 w-8">
-                <RefreshCw className="h-4 w-4 text-muted-foreground" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="left">Start New Session</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        <div className="flex items-center gap-2">
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" onClick={handleNewChat} className="h-8 w-8">
+                  <PlusCircle className="h-4 w-4 text-muted-foreground" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="left">Start New Chat</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" onClick={() => setIsHistoryCollapsed(prev => !prev)} className="h-8 w-8">
+                  <HistoryIcon className="h-4 w-4 text-muted-foreground" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="left">View Chat History</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
       </CardHeader>
 
       <CardContent className="flex-1 p-0 overflow-hidden relative bg-background/50">
         <ScrollArea className="h-full p-4">
+          <Collapsible open={!isHistoryCollapsed} onOpenChange={setIsHistoryCollapsed} className="mb-4">
+            <CollapsibleContent className="space-y-2 animate-accordion-down">
+              {isLoadingSessions ? (
+                <div className="text-center text-muted-foreground py-4">Loading sessions...</div>
+              ) : availableChatSessions.length > 0 ? (
+                <div className="space-y-2">
+                  {availableChatSessions.map(sessionItem => (
+                    <Button
+                      key={sessionItem.id}
+                      variant={sessionItem.id === selectedChatSessionId ? 'secondary' : 'ghost'}
+                      className="w-full justify-start text-sm h-auto py-2 px-3"
+                      onClick={() => handleSelectSession(sessionItem.id)}
+                    >
+                      <HistoryIcon className="h-4 w-4 mr-2 opacity-70" />
+                      <span className="flex-1 text-left truncate">
+                        Chat from {new Date(sessionItem.created_at).toLocaleString()}
+                      </span>
+                      {sessionItem.id === selectedChatSessionId && (
+                        <Badge variant="outline" className="ml-2">Active</Badge>
+                      )}
+                    </Button>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-center text-muted-foreground italic py-4">No past chats for this context.</p>
+              )}
+            </CollapsibleContent>
+          </Collapsible>
+
           <div className="space-y-6 pb-4 min-h-[200px]">
             {!isLoadingHistory && messages.length === 0 && (
               <div className="flex flex-col items-center justify-center h-[300px] text-center text-muted-foreground px-8">
