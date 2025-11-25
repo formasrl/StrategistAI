@@ -13,6 +13,14 @@ import CurrentContextDisplay from '@/components/layout/CurrentContextDisplay';
 import OnboardingTour from '@/components/onboarding/OnboardingTour'; // Import OnboardingTour
 import { useAppSetup } from '@/components/layout/AppSetupProvider'; // Import useAppSetup
 
+// Define context type to include refreshProjects and setContentToInsert
+type DashboardOutletContext = {
+  setDocumentIdForAiPanel?: (docId: string | undefined) => void;
+  setStepIdForAiPanel?: (stepId: string | undefined) => void;
+  refreshProjects?: () => void;
+  setContentToInsert?: (content: string) => void; // New: Function to set content for editor
+};
+
 const Dashboard = () => {
   const { session, isLoading } = useSession();
   const navigate = useNavigate();
@@ -36,6 +44,8 @@ const Dashboard = () => {
 
   // State to trigger project list refresh
   const [projectsRefreshTrigger, setProjectsRefreshTrigger] = useState(0);
+  // New state for content to be inserted into the editor
+  const [contentToInsert, setContentToInsert] = useState<string | null>(null);
 
   const refreshProjects = useCallback(() => {
     setProjectsRefreshTrigger((prev) => prev + 1);
@@ -158,10 +168,11 @@ const Dashboard = () => {
     }
   };
 
-  const outletContextValue = {
+  const outletContextValue: DashboardOutletContext = {
     setDocumentIdForAiPanel: setAiPanelDocumentId,
     setStepIdForAiPanel: setAiPanelStepId,
     refreshProjects, // Expose refresh function to outlets
+    setContentToInsert, // New: Expose setContentToInsert
   };
 
   // Determine if the tour should run
@@ -207,6 +218,8 @@ const Dashboard = () => {
             phaseId={aiPanelPhaseId}
             stepId={aiPanelStepId}
             documentId={aiPanelDocumentId}
+            contentToInsert={contentToInsert} // Pass contentToInsert to AiPanel
+            setContentToInsert={setContentToInsert} // Pass setContentToInsert to AiPanel
           />
         }
       />

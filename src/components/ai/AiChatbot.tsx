@@ -2,11 +2,10 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { MessageCircle, Send, Loader2, Bot, User, BookOpen, PlusCircle, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
+import { MessageCircle, Send, Loader2, Bot, User, BookOpen, PlusCircle, RefreshCw, ChevronDown, ChevronUp, Paperclip } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { supabase } from '@/integrations/supabase/client';
-import { useSession } from '@/integrations/supabase/SessionContextProvider';
-import { showError } from '@/utils/toast';
+import { showError, showSuccess } from '@/utils/toast';
 import { cn } from '@/lib/utils';
 import {
   Collapsible,
@@ -21,6 +20,10 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
+import mammoth from 'mammoth'; // For .docx
+import { marked } from 'marked'; // For .md to HTML conversion
+import DOMPurify from 'dompurify'; // For sanitizing HTML
+
 interface ChatSource {
   document_name: string;
   chunk_preview: string;
@@ -33,6 +36,8 @@ interface ChatMessage {
   text: string;
   timestamp: string;
   sources?: ChatSource[];
+  insertContent?: string; // New: content AI wants to insert into editor
+  uploadedFileName?: string; // New: name of file uploaded by user
 }
 
 interface AiChatbotProps {
@@ -40,17 +45,21 @@ interface AiChatbotProps {
   phaseId?: string;
   stepId?: string;
   documentId?: string;
+  contentToInsert: string | null;
+  setContentToInsert: (content: string | null) => void;
 }
 
-const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, documentId }) => {
+const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, documentId, setContentToInsert }) => {
   const { session } = useSession();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [currentChatSessionId, setCurrentChatSessionId] = useState<string | undefined>(undefined);
-  
+  const [uploadedFile, setUploadedFile] = useState<{ name: string; content: string } | null>(null); // New state for uploaded file
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null); // Ref for hidden file input
 
   // 1. Auto-scroll
   useEffect(() => {
@@ -70,6 +79,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
         setIsLoadingHistory(true);
         setMessages([]);
         setCurrentChatSessionId(undefined);
+        setUploadedFile(null); // Clear uploaded file on context change
       }
 
       try {
@@ -146,11 +156,28 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
             // Deduplicate based on ID to prevent double-adding (optimistic + realtime)
             if (prev.some(m => m.id === newMsg.id)) return prev;
 
+            // Parse for insert_content from the full message content
+            let insertContent: string | undefined;
+            let displayContent = newMsg.content;
+            const jsonBlockMatch = newMsg.content.match(/```json\n?({[\s\S]*?})\n?```/);
+            if (jsonBlockMatch && jsonBlockMatch[1]) {
+              try {
+                const parsed = JSON.parse(jsonBlockMatch[1]);
+                if (typeof parsed.insert_content === 'string') {
+                  insertContent = parsed.insert_content;
+                  displayContent = newMsg.content.replace(jsonBlockMatch[0], '').trim();
+                }
+              } catch (e) {
+                console.error("Failed to parse insert_content JSON block from realtime message:", e);
+              }
+            }
+
             return [...prev, {
               id: newMsg.id,
               sender: newMsg.role === 'user' ? 'user' : 'ai',
-              text: newMsg.content,
-              timestamp: newMsg.created_at
+              text: displayContent,
+              timestamp: newMsg.created_at,
+              insertContent: insertContent,
             }];
           });
         }
@@ -166,7 +193,8 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
   const handleSendMessage = async (e?: React.FormEvent) => {
     e?.preventDefault();
     const text = inputMessage.trim();
-    if (!text || isSending) return;
+    if (!text && !uploadedFile) return; // Allow sending only file
+    if (isSending) return;
 
     if (!projectId) {
       showError('Select a project to chat.');
@@ -181,8 +209,9 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
     setMessages(prev => [...prev, {
       id: tempUserMsgId,
       sender: 'user',
-      text: text,
-      timestamp: new Date().toISOString()
+      text: uploadedFile ? `(File: ${uploadedFile.name}) ${text}` : text,
+      timestamp: new Date().toISOString(),
+      uploadedFileName: uploadedFile?.name,
     }]);
 
     try {
@@ -202,6 +231,8 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
             documentId,
             chatSessionId: currentChatSessionId,
             stream: false, // FORCE JSON RESPONSE for stability
+            uploadedFileContent: uploadedFile?.content, // New: Pass uploaded file content
+            uploadedFileName: uploadedFile?.name, // New: Pass uploaded file name
           }),
         },
       );
@@ -223,7 +254,8 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
         sender: 'ai',
         text: data.reply,
         timestamp: new Date().toISOString(),
-        sources: data.sources
+        sources: data.sources,
+        insertContent: data.insertContent, // New: Store content for insertion
       }]);
 
     } catch (err: any) {
@@ -232,6 +264,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
       // Optionally remove optimistic message or show error state
     } finally {
       setIsSending(false);
+      setUploadedFile(null); // Clear uploaded file after sending
     }
   };
 
@@ -239,6 +272,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
     setMessages([]);
     setCurrentChatSessionId(undefined);
     setInputMessage('');
+    setUploadedFile(null); // Clear uploaded file on new chat
   };
 
   const renderMessageContent = (text: string) => {
@@ -287,6 +321,68 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
     return 'Chat';
   };
 
+  // File upload handlers
+  const handleFileUploadClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 1024 * 1024 * 5) { // 5MB limit
+      showError('File size exceeds 5MB limit.');
+      return;
+    }
+
+    const fileExtension = file.name.split('.').pop()?.toLowerCase();
+    let fileContent = '';
+
+    try {
+      if (fileExtension === 'docx') {
+        const arrayBuffer = await file.arrayBuffer();
+        const result = await mammoth.extractRawText({ arrayBuffer });
+        fileContent = result.value;
+      } else if (fileExtension === 'html') {
+        fileContent = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target?.result as string);
+          reader.readAsText(file);
+        });
+        fileContent = new DOMParser().parseFromString(fileContent, 'text/html').body.textContent || '';
+      } else if (fileExtension === 'md') {
+        fileContent = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target?.result as string);
+          reader.readAsText(file);
+        });
+      } else {
+        showError('Unsupported file type. Please upload .docx, .html, or .md files.');
+        return;
+      }
+
+      setUploadedFile({ name: file.name, content: fileContent });
+      showSuccess(`File "${file.name}" loaded for chat.`);
+    } catch (error: any) {
+      console.error('File processing error:', error);
+      showError(`Failed to process file: ${error.message}`);
+      setUploadedFile(null);
+    } finally {
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''; // Clear the file input
+      }
+    }
+  };
+
+  const handleUseThisContent = (content: string) => {
+    if (!documentId) {
+      showError('Please navigate to a document to insert content.');
+      return;
+    }
+    setContentToInsert(content);
+    showSuccess('Content sent to editor. Check the document editor panel!');
+  };
+
   return (
     <Card className="flex flex-col h-full border-none shadow-none bg-transparent">
       {/* Header */}
@@ -332,9 +428,25 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
                     ? 'bg-primary text-primary-foreground rounded-tr-sm' 
                     : 'bg-card border border-border text-card-foreground rounded-tl-sm'
                 )}>
+                  {msg.uploadedFileName && msg.sender === 'user' && (
+                    <div className="flex items-center text-xs text-muted-foreground mb-1">
+                      <Paperclip className="h-3 w-3 mr-1" />
+                      <span>{msg.uploadedFileName}</span>
+                    </div>
+                  )}
                   <div className="whitespace-pre-wrap break-words">
                     {renderMessageContent(msg.text)}
                   </div>
+                  {msg.sender === 'ai' && msg.insertContent && documentId && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="mt-2 w-full"
+                      onClick={() => handleUseThisContent(msg.insertContent!)}
+                    >
+                      Use this in editor
+                    </Button>
+                  )}
                   {msg.sender === 'ai' && renderSources(msg.sources)}
                   <div className={cn("text-[10px] mt-1 text-right opacity-70")}>
                     {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -367,16 +479,41 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
       {/* Input */}
       <CardFooter className="p-4 pt-2 border-t border-border bg-background">
         <form onSubmit={handleSendMessage} className="flex w-full gap-2">
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileChange}
+            style={{ display: 'none' }}
+            accept=".docx,.html,.md"
+          />
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  onClick={handleFileUploadClick}
+                  disabled={isSending}
+                  className="shrink-0"
+                >
+                  <Paperclip className="h-4 w-4" />
+                  <span className="sr-only">Attach File</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">Attach Document (.docx, .html, .md)</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           <Input
             id="tour-ai-chat-input"
-            placeholder="Ask a question..."
+            placeholder={uploadedFile ? `Ask about "${uploadedFile.name}" or type message...` : "Ask a question..."}
             value={inputMessage}
             onChange={(e) => setInputMessage(e.target.value)}
             disabled={isSending}
             className="flex-1"
             autoComplete="off"
           />
-          <Button type="submit" size="icon" disabled={!inputMessage.trim() || isSending}>
+          <Button type="submit" size="icon" disabled={(!inputMessage.trim() && !uploadedFile) || isSending}>
             {isSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             <span className="sr-only">Send</span>
           </Button>

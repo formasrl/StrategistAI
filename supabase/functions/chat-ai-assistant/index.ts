@@ -108,6 +108,8 @@ serve(async (req) => {
       documentId,
       chatSessionId: incomingChatSessionId,
       stream = true,
+      uploadedFileContent, // New: uploaded file content
+      uploadedFileName, // New: uploaded file name
     }: {
       message?: string;
       projectId?: string;
@@ -115,6 +117,8 @@ serve(async (req) => {
       documentId?: string;
       chatSessionId?: string;
       stream?: boolean;
+      uploadedFileContent?: string;
+      uploadedFileName?: string;
     } = body ?? {};
 
     if (!message || !projectId) {
@@ -152,7 +156,7 @@ serve(async (req) => {
     await supabaseClient.from("chat_messages").insert({
       chat_session_id: currentChatSessionId,
       role: "user",
-      content: message,
+      content: uploadedFileName ? `(File: ${uploadedFileName}) ${message}` : message,
     });
 
     // Layer 1: Project Profile
@@ -299,11 +303,14 @@ serve(async (req) => {
 
     const systemPrompt = [
       "You are StrategistAI, a senior brand strategist and coach.",
-      "The user writes their own brand materials. Do NOT create full documents.",
+      "The user writes their own brand materials. Do NOT create full documents unless explicitly asked to 'write' or 'generate' a document.",
       "Focus on guidance, critique, and strategic alignment.",
       "Always respect previously published decisions and call out conflicts politely.",
       "If information is missing, ask clarifying questions instead of guessing.",
       "Synthesize information from the 'RELEVANT SEMANTIC MEMORIES' section to provide comprehensive answers.",
+      "If the user uploads a file, prioritize using that content for analysis or generation.",
+      "When generating content for a document (e.g., a SWOT analysis, a brief), format your response in Markdown.",
+      "If you generate content that could be inserted into the editor, wrap it in a special JSON block like this: ```json\n{\"insert_content\": \"YOUR MARKDOWN CONTENT HERE\"}\n```. Otherwise, respond normally.",
     ].join(" ");
 
     const modelTokenLimit = getModelTokenLimit(CHAT_MODEL);
@@ -322,6 +329,9 @@ serve(async (req) => {
     if (currentDocumentContentExcerpt) {
       promptParts.push(`CURRENT DRAFT EXCERPT:\n${currentDocumentContentExcerpt}`);
     }
+    if (uploadedFileContent) { // New: Include uploaded file content
+      promptParts.push(`UPLOADED FILE CONTENT (File: ${uploadedFileName || 'untitled'}):\n${truncateToChars(uploadedFileContent, TRUNCATION_CHAR_LIMIT)}`);
+    }
     promptParts.push(`USER QUESTION:\n${message}`);
 
     let finalPrompt = promptParts.join("\n\n");
@@ -331,13 +341,39 @@ serve(async (req) => {
       `[chat-ai-assistant] Initial prompt token count: ${totalPromptTokens} for model: ${CHAT_MODEL}`
     );
 
-    // Truncation: keep user question, then document, then conversation, then semantic memories
+    // Truncation: keep user question, then document, then conversation, then semantic memories, then uploaded file content
     if (totalPromptTokens > modelTokenLimit) {
       console.log(
         `[chat-ai-assistant] Prompt exceeds ${modelTokenLimit} tokens. Attempting truncation.`
       );
 
+      // Truncate uploaded file content first if it's the largest
       if (
+        uploadedFileContent &&
+        countTokens(uploadedFileContent) > TRUNCATION_CHAR_LIMIT / 4
+      ) {
+        uploadedFileContent = truncateToChars(
+          uploadedFileContent,
+          TRUNCATION_CHAR_LIMIT
+        );
+        finalPrompt = rebuildPrompt(
+          currentProjectProfileText,
+          currentDocumentContextText,
+          formattedSemanticMemories,
+          currentStepDefinition,
+          currentConversationSnippet,
+          currentDocumentContentExcerpt,
+          uploadedFileContent, // Pass truncated uploaded content
+          message
+        );
+        totalPromptTokens = countTokens(systemPrompt + finalPrompt);
+        console.log(
+          `[chat-ai-assistant] Uploaded file content truncated. New token count: ${totalPromptTokens}`
+        );
+      }
+
+      if (
+        totalPromptTokens > modelTokenLimit &&
         currentDocumentContentExcerpt &&
         countTokens(currentDocumentContentExcerpt) > TRUNCATION_CHAR_LIMIT / 4
       ) {
@@ -352,6 +388,7 @@ serve(async (req) => {
           currentStepDefinition,
           currentConversationSnippet,
           currentDocumentContentExcerpt,
+          uploadedFileContent,
           message
         );
         totalPromptTokens = countTokens(systemPrompt + finalPrompt);
@@ -373,6 +410,7 @@ serve(async (req) => {
           currentStepDefinition,
           currentConversationSnippet,
           currentDocumentContentExcerpt,
+          uploadedFileContent,
           message
         );
         totalPromptTokens = countTokens(systemPrompt + finalPrompt);
@@ -397,6 +435,7 @@ serve(async (req) => {
           currentStepDefinition,
           currentConversationSnippet,
           currentDocumentContentExcerpt,
+          uploadedFileContent,
           message
         );
         totalPromptTokens = countTokens(systemPrompt + finalPrompt);
@@ -460,11 +499,28 @@ serve(async (req) => {
         fullReplyContent.length
       );
 
+      // Check for insert_content JSON block
+      let insertContent: string | undefined;
+      const jsonBlockMatch = fullReplyContent.match(/```json\n?({[\s\S]*?})\n?```/);
+      if (jsonBlockMatch && jsonBlockMatch[1]) {
+        try {
+          const parsed = JSON.parse(jsonBlockMatch[1]);
+          if (typeof parsed.insert_content === 'string') {
+            insertContent = parsed.insert_content;
+            // Remove the JSON block from the displayable reply content
+            fullReplyContent = fullReplyContent.replace(jsonBlockMatch[0], '').trim();
+          }
+        } catch (e) {
+          console.error("Failed to parse insert_content JSON block:", e);
+        }
+      }
+
       return respond({
         reply: fullReplyContent,
         sources,
         chatSessionId: currentChatSessionId,
         metadata: { history_pruned: historyPruned },
+        insertContent: insertContent, // New: Pass content for insertion
       });
     }
 
@@ -545,12 +601,29 @@ serve(async (req) => {
             fullReplyContent.length
           );
 
+          // Check for insert_content JSON block in the fullReplyContent
+          let insertContent: string | undefined;
+          const jsonBlockMatch = fullReplyContent.match(/```json\n?({[\s\S]*?})\n?```/);
+          if (jsonBlockMatch && jsonBlockMatch[1]) {
+            try {
+              const parsed = JSON.parse(jsonBlockMatch[1]);
+              if (typeof parsed.insert_content === 'string') {
+                insertContent = parsed.insert_content;
+                // Note: For streaming, we can't easily remove the JSON block from the streamed tokens
+                // The frontend will need to handle parsing the final message.
+              }
+            } catch (e) {
+              console.error("Failed to parse insert_content JSON block in streamed response:", e);
+            }
+          }
+
           controller.enqueue(
             `data: ${JSON.stringify({
               type: "sources",
               content: sources,
               chatSessionId: currentChatSessionId,
               metadata: { history_pruned: historyPruned },
+              insertContent: insertContent, // New: Pass content for insertion
             })}\n\n`,
           );
         } catch (error) {
@@ -588,6 +661,7 @@ function rebuildPrompt(
   stepDefinition: string,
   conversationSnippet: string | null,
   documentExcerpt: string | null,
+  uploadedFileContent: string | null, // New: uploaded file content
   userQuestion: string
 ): string {
   const parts: string[] = [];
@@ -602,6 +676,9 @@ function rebuildPrompt(
   }
   if (documentExcerpt) {
     parts.push(`CURRENT DRAFT EXCERPT:\n${documentExcerpt}`);
+  }
+  if (uploadedFileContent) { // New: Include uploaded file content
+    parts.push(`UPLOADED FILE CONTENT:\n${uploadedFileContent}`);
   }
   parts.push(`USER QUESTION:\n${userQuestion}`);
   return parts.join("\n\n");

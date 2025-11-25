@@ -18,12 +18,15 @@ import { cn } from '@/lib/utils';
 
 import html2canvas from 'html2canvas'; // Import html2canvas
 import jsPDF from 'jspdf'; // Import jspdf
+import { marked } from 'marked'; // Import marked for Markdown to HTML conversion
 
 type DashboardOutletContext = {
   setAiReview?: (review: AiReview | null) => void;
   setIsAiReviewLoading?: (isLoading: boolean) => void;
   setDocumentIdForAiPanel?: (docId: string | undefined) => void;
   setStepIdForAiPanel?: (stepId: string | undefined) => void;
+  setContentToInsert?: (content: string | null) => void; // New: Function to set content for editor
+  contentToInsert?: string | null; // New: Content to insert
 };
 
 interface DocumentEditorProps {
@@ -71,6 +74,8 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
     setIsAiReviewLoading: contextSetIsAiReviewLoading,
     setDocumentIdForAiPanel: contextSetDocumentIdForAiPanel,
     setStepIdForAiPanel: contextSetStepIdForAiPanel,
+    contentToInsert, // New: Get content to insert from context
+    setContentToInsert, // New: Get setter for content to insert from context
   } = outletContext ?? {};
 
   const setAiReviewFn = useCallback(
@@ -205,6 +210,28 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
   useEffect(() => {
     fetchDocument();
   }, [fetchDocument]);
+
+  // New: Effect to handle content insertion from AI Chatbot
+  useEffect(() => {
+    const insertAiContent = async () => {
+      if (contentToInsert && quillRef.current) {
+        const quill = quillRef.current.getEditor();
+        const range = quill.getSelection(true);
+
+        // Convert Markdown to HTML
+        const htmlContent = await marked.parse(contentToInsert);
+        const sanitizedHtml = DOMPurify.sanitize(htmlContent);
+
+        quill.clipboard.dangerouslyPasteHTML(range.index, sanitizedHtml);
+        quill.setSelection(range.index + sanitizedHtml.length, 0); // Move cursor after inserted content
+        setContent(quill.root.innerHTML); // Update local state with new content
+        setContentToInsert?.(null); // Clear the content after insertion
+      }
+    };
+
+    insertAiContent();
+  }, [contentToInsert, setContentToInsert]);
+
 
   const handleSave = async () => {
     if (!document || isSaving || isPublished) return;

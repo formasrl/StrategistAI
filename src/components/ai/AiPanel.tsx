@@ -12,6 +12,8 @@ interface AiPanelProps {
   phaseId?: string;
   stepId?: string;
   documentId?: string;
+  contentToInsert: string | null; // New prop
+  setContentToInsert: (content: string | null) => void; // New prop
 }
 
 const AiPanel: React.FC<AiPanelProps> = ({
@@ -19,6 +21,8 @@ const AiPanel: React.FC<AiPanelProps> = ({
   phaseId,
   stepId,
   documentId,
+  contentToInsert,
+  setContentToInsert,
 }) => {
   return (
     <Tabs defaultValue="chat" className="flex h-full min-h-0 flex-col">
@@ -34,7 +38,14 @@ const AiPanel: React.FC<AiPanelProps> = ({
         value="chat"
         className="mt-0 flex h-full min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden"
       >
-        <AiChatbot projectId={projectId} phaseId={phaseId} stepId={stepId} documentId={documentId} />
+        <AiChatbot
+          projectId={projectId}
+          phaseId={phaseId}
+          stepId={stepId}
+          documentId={documentId}
+          contentToInsert={contentToInsert}
+          setContentToInsert={setContentToInsert}
+        />
       </TabsContent>
       <TabsContent
         value="review"
