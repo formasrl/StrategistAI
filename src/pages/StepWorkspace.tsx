@@ -8,6 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Lightbulb, Loader2 } from 'lucide-react';
 import DocumentEditor from './DocumentEditor';
+import { saveLastActiveStep } from '@/utils/localStorage'; // Import localStorage utility
 
 interface StepWorkspaceOutletContext {
   setAiReview: (review: AiReview | null) => void;
@@ -30,6 +31,13 @@ const StepWorkspace: React.FC = () => {
     setDocumentIdForAiPanel,
     setStepIdForAiPanel,
   } = useOutletContext<StepWorkspaceOutletContext>();
+
+  // Save last active step to local storage
+  useEffect(() => {
+    if (projectId && stepId) {
+      saveLastActiveStep(projectId, stepId);
+    }
+  }, [projectId, stepId]);
 
   useEffect(() => {
     setStepIdForAiPanel(stepId);

@@ -12,8 +12,9 @@ import { Project, Phase, Step, Document } from '@/types/supabase';
 import CurrentContextDisplay from '@/components/layout/CurrentContextDisplay';
 import OnboardingTour from '@/components/onboarding/OnboardingTour'; // Import OnboardingTour
 import { useAppSetup } from '@/components/layout/AppSetupProvider'; // Import useAppSetup
+import { getLastActiveStep, clearLastActiveStep } from '@/utils/localStorage'; // Import localStorage utilities
 
-// Define context type to include refreshProjects and setContentToInsert
+// Define context type to include refreshProjects
 type DashboardOutletContext = {
   setDocumentIdForAiPanel?: (docId: string | undefined) => void;
   setStepIdForAiPanel?: (stepId: string | undefined) => void;
@@ -54,8 +55,52 @@ const Dashboard = () => {
   useEffect(() => {
     if (!isLoading && !session) {
       navigate('/login');
+    } else if (!isLoading && session) {
+      // Check for last active step only if not already on a specific project/step/document route
+      if (!projectId && !stepId && !documentId) {
+        const lastActive = getLastActiveStep();
+        if (lastActive) {
+          if (lastActive.documentId) {
+            navigate(`/dashboard/${lastActive.projectId}/document/${lastActive.documentId}`);
+          } else if (lastActive.stepId) {
+            navigate(`/dashboard/${lastActive.projectId}/step/${lastActive.stepId}`);
+          } else if (lastActive.projectId) {
+            navigate(`/dashboard/${lastActive.projectId}`);
+          }
+          return; // Prevent further redirects if we found a last active step
+        }
+      }
+
+      // If no last active step or already on a specific route, check if user has projects
+      const checkProjects = async () => {
+        const { data, error } = await supabase
+          .from('projects')
+          .select('id')
+          .eq('user_id', session.user.id)
+          .limit(1);
+
+        if (error) {
+          console.error("Error checking projects:", error);
+          // If error or no projects, redirect to new project creation
+          if (!projectId && !stepId && !documentId) { // Only redirect if not already on a specific route
+            navigate('/project/new');
+          }
+        } else if (!data || data.length === 0) {
+          // If no projects, redirect to new project creation
+          if (!projectId && !stepId && !documentId) { // Only redirect if not already on a specific route
+            navigate('/project/new');
+          }
+        }
+        // If projects exist, and no specific route is active, stay on /dashboard or let Outlet render default
+      };
+
+      // Only run checkProjects if not already navigating to a specific project/step/document
+      if (!projectId && !stepId && !documentId) {
+        checkProjects();
+      }
     }
-  }, [session, isLoading, navigate]);
+  }, [session, isLoading, navigate, projectId, stepId, documentId]);
+
 
   useEffect(() => {
     setAiPanelDocumentId(documentId);
@@ -164,6 +209,7 @@ const Dashboard = () => {
       showError(`Logout failed: ${error.message}`);
     } else {
       showSuccess('You have been logged out.');
+      clearLastActiveStep(); // Clear last active step on logout
       navigate('/login');
     }
   };

@@ -19,6 +19,13 @@ import { cn } from '@/lib/utils';
 import html2canvas from 'html2canvas'; // Import html2canvas
 import jsPDF from 'jspdf'; // Import jspdf
 import { marked } from 'marked'; // Import marked for Markdown to HTML conversion
+import DOMPurify from 'dompurify'; // Import DOMPurify for sanitization
+import mammoth from 'mammoth'; // Import mammoth for docx parsing
+import * as pdfjsLib from 'pdfjs-dist'; // Import pdfjs-dist for PDF parsing
+import { saveLastActiveStep } from '@/utils/localStorage'; // Import localStorage utility
+
+// Set worker source explicitly to 4.4.168 CDN version to match package.json
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs`;
 
 type DashboardOutletContext = {
   setAiReview?: (review: AiReview | null) => void;
@@ -118,8 +125,12 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
   useEffect(() => {
     if (document?.step_id) {
       contextSetStepIdForAiPanel?.(document.step_id);
+      // Save last active step and document to local storage
+      if (currentProjectId && document.step_id && currentDocumentId) {
+        saveLastActiveStep(currentProjectId, document.step_id, currentDocumentId);
+      }
     }
-  }, [document?.step_id, contextSetStepIdForAiPanel]);
+  }, [document?.step_id, currentProjectId, currentDocumentId, contextSetStepIdForAiPanel]);
 
   const [isLoadingDocument, setIsLoadingDocument] = useState(true);
   const [content, setContent] = useState<string>('');
@@ -408,7 +419,6 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
       const fileExtension = file.name.split('.').pop()?.toLowerCase();
 
       if (fileExtension === 'docx') {
-        const mammoth = await import('mammoth');
         const arrayBuffer = await file.arrayBuffer();
         const result = await mammoth.convertToHtml({ arrayBuffer });
         contentHtml = result.value;
@@ -421,7 +431,6 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
         });
         rawTextContent = new DOMParser().parseFromString(contentHtml, 'text/html').body.textContent || '';
       } else if (fileExtension === 'md') {
-        const { marked } = await import('marked');
         const markdownText = await new Promise<string>((resolve) => {
           const reader = new FileReader();
           reader.onload = (e) => resolve(e.target?.result as string);
@@ -429,12 +438,34 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
         });
         contentHtml = await marked.parse(markdownText);
         rawTextContent = markdownText;
+      } else if (fileExtension === 'pdf') {
+        const arrayBuffer = await file.arrayBuffer();
+        const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+        const pdf = await loadingTask.promise;
+        
+        let fullText = '';
+        const maxPages = Math.min(pdf.numPages, 10); 
+        
+        for (let p = 1; p <= maxPages; p++) {
+          const page = await pdf.getPage(p);
+          const textContent = await page.getTextContent();
+          const pageText = textContent.items
+            .map((item: any) => item.str)
+            .join(' ');
+          fullText += pageText + '\n\n';
+        }
+        
+        if (pdf.numPages > maxPages) {
+          fullText += `\n[...PDF truncated after ${maxPages} pages...]`;
+        }
+        fileContent = fullText;
+        contentHtml = marked.parse(fullText); // Convert PDF text to HTML for editor
+        rawTextContent = fullText;
       } else {
-        showError('Unsupported file type. Please upload .docx, .html, or .md files.');
+        showError('Unsupported file type. Please upload .docx, .html, .md, or .pdf files.');
         return;
       }
 
-      const DOMPurify = (await import('dompurify')).default;
       const sanitizedHtml = DOMPurify.sanitize(contentHtml);
 
       if (quillRef.current) {
@@ -679,7 +710,7 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
               onClick={handleUploadFileButtonClick}
               variant="outline"
               disabled={isPublished || isHistoricalView || isUploadingFile}
-              title="Supported formats: .docx, .html, .md"
+              title="Supported formats: .docx, .html, .md, .pdf"
             >
               {isUploadingFile ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -735,7 +766,7 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
             ref={fileInputRef}
             onChange={handleFileChange}
             style={{ display: 'none' }}
-            accept=".docx,.html,.md"
+            accept=".docx,.html,.md,.pdf"
           />
         </CardContent>
       </Card>
