@@ -1,8 +1,21 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+// We will replace the single-line Input with a textarea for multiline support
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { MessageCircle, Send, Loader2, Bot, User, BookOpen, RefreshCw, ChevronDown, Paperclip, PlusCircle, X, History as HistoryIcon } from 'lucide-react';
+import {
+  MessageCircle,
+  Send,
+  Loader2,
+  Bot,
+  User,
+  BookOpen,
+  ChevronDown,
+  Paperclip,
+  PlusCircle,
+  X,
+  History as HistoryIcon,
+  Trash2,
+} from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { supabase } from '@/integrations/supabase/client';
 import { useSession } from '@/integrations/supabase/SessionContextProvider';
@@ -19,16 +32,20 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { Badge } from "@/components/ui/badge";
+} from '@/components/ui/tooltip';
+import { Badge } from '@/components/ui/badge';
 
-import mammoth from 'mammoth'; // For .docx
-// pdfjs-dist import
+import mammoth from 'mammoth';
 import * as pdfjsLib from 'pdfjs-dist';
-import { saveLastActiveChatSession, getLastActiveChatSession, clearLastActiveChatSession } from '@/utils/localStorage'; // New imports
+import {
+  saveLastActiveChatSession,
+  getLastActiveChatSession,
+  clearLastActiveChatSession,
+} from '@/utils/localStorage';
 
-// Set worker source explicitly to 4.4.168 CDN version to match package.json
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs`;
+// match package.json version
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://unpkg.com/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs';
 
 interface ChatSource {
   document_name: string;
@@ -43,8 +60,7 @@ interface ChatMessage {
   timestamp: string;
   sources?: ChatSource[];
   insertContent?: string;
-  uploadedFileName?: string; // Keeping for backward compatibility
-  uploadedFiles?: string[]; // New: array of file names
+  uploadedFiles?: string[];
 }
 
 interface ChatSession {
@@ -58,7 +74,6 @@ interface AiChatbotProps {
   phaseId?: string;
   stepId?: string;
   documentId?: string;
-  contentToInsert: string | null;
   setContentToInsert: (content: string | null) => void;
 }
 
@@ -67,31 +82,40 @@ interface UploadedFile {
   content: string;
 }
 
-const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, documentId, setContentToInsert }) => {
+const AiChatbot: React.FC<AiChatbotProps> = ({
+  projectId,
+  phaseId,
+  stepId,
+  documentId,
+  setContentToInsert,
+}) => {
   const { session } = useSession();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
-  const [currentChatSessionId, setCurrentChatSessionId] = useState<string | undefined>(undefined);
+  const [currentChatSessionId, setCurrentChatSessionId] = useState<string | undefined>(
+    undefined,
+  );
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
 
   const [availableChatSessions, setAvailableChatSessions] = useState<ChatSession[]>([]);
-  const [selectedChatSessionId, setSelectedChatSessionId] = useState<string | undefined>(undefined);
+  const [selectedChatSessionId, setSelectedChatSessionId] = useState<string | undefined>(
+    undefined,
+  );
   const [isLoadingSessions, setIsLoadingSessions] = useState(false);
   const [isHistoryCollapsed, setIsHistoryCollapsed] = useState(true);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 1. Auto-scroll
+  // auto scroll
   useEffect(() => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
   }, [messages, isSending, uploadedFiles]);
 
-  // Helper to fetch messages for a given session ID
   const fetchMessagesForSession = useCallback(async (sessionId: string) => {
     const { data: messagesData, error: messagesError } = await supabase
       .from('chat_messages')
@@ -104,9 +128,10 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
       return [];
     }
 
-    return messagesData.map(msg => {
+    return messagesData.map((msg: any) => {
       let insertContent: string | undefined;
       let displayContent = msg.content || '';
+
       const jsonBlockMatch = displayContent.match(/```json\n?({[\s\S]*?})\n?```/);
       if (jsonBlockMatch && jsonBlockMatch[1]) {
         try {
@@ -115,18 +140,18 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
             insertContent = parsed.insert_content;
             displayContent = displayContent.replace(jsonBlockMatch[0], '').trim();
           }
-        } catch (e) {
-          // ignore parsing error
+        } catch {
+          // ignore parsing failure
         }
       }
 
       let fileNames: string[] = [];
       const fileMatch = msg.content.match(/\(Files?: ([^)]+)\)/);
       if (fileMatch) {
-        fileNames = fileMatch[1].split(',').map(s => s.trim());
+        fileNames = fileMatch[1].split(',').map((s: string) => s.trim());
       } else if (msg.content.match(/^\(File: .+\)/)) {
-         const legacyMatch = msg.content.match(/^\(File: (.+?)\)/);
-         if (legacyMatch) fileNames = [legacyMatch[1]];
+        const legacyMatch = msg.content.match(/^\(File: (.+?))\)/);
+        if (legacyMatch) fileNames = [legacyMatch[1]];
       }
 
       return {
@@ -134,20 +159,20 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
         sender: msg.role === 'user' ? 'user' : 'ai',
         text: displayContent,
         timestamp: msg.created_at,
-        sources: [], 
-        insertContent: insertContent,
+        sources: [],
+        insertContent,
         uploadedFiles: fileNames.length > 0 ? fileNames : undefined,
-      };
+      } as ChatMessage;
     });
   }, []);
 
-  // 2. Fetch History & Determine Session ID
+  // fetch sessions + last-active session
   useEffect(() => {
     let isMounted = true;
 
     const fetchSessionsAndHistory = async () => {
       if (!projectId) return;
-      
+
       if (isMounted) {
         setIsLoadingHistory(true);
         setIsLoadingSessions(true);
@@ -179,20 +204,20 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
           console.error('Error fetching chat sessions:', sessionsError);
         } else if (sessionsData && isMounted) {
           setAvailableChatSessions(sessionsData);
-          
+
           let sessionToLoadId: string | undefined;
           const lastActiveChat = getLastActiveChatSession(projectId, stepId, documentId);
 
-          if (lastActiveChat && sessionsData.some(s => s.id === lastActiveChat)) {
+          if (lastActiveChat && sessionsData.some((s) => s.id === lastActiveChat)) {
             sessionToLoadId = lastActiveChat;
           } else if (sessionsData.length > 0) {
-            sessionToLoadId = sessionsData[0].id; // Fallback to latest if no persisted or persisted is invalid
+            sessionToLoadId = sessionsData[0].id;
           }
 
           if (sessionToLoadId) {
             setSelectedChatSessionId(sessionToLoadId);
             setCurrentChatSessionId(sessionToLoadId);
-            saveLastActiveChatSession(projectId, stepId, documentId, sessionToLoadId); // Persist the loaded session
+            saveLastActiveChatSession(projectId, stepId, documentId, sessionToLoadId);
             const loadedMessages = await fetchMessagesForSession(sessionToLoadId);
             if (isMounted) setMessages(loadedMessages);
           }
@@ -209,25 +234,31 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
 
     fetchSessionsAndHistory();
 
-    return () => { isMounted = false; };
+    return () => {
+      isMounted = false;
+    };
   }, [projectId, stepId, documentId, fetchMessagesForSession]);
 
-  // Handle session selection from history
-  const handleSelectSession = useCallback(async (sessionId: string) => {
-    if (sessionId === selectedChatSessionId) return; // Already selected
+  const handleSelectSession = useCallback(
+    async (sessionId: string) => {
+      if (sessionId === selectedChatSessionId) return;
 
-    setIsLoadingHistory(true);
-    setSelectedChatSessionId(sessionId);
-    setCurrentChatSessionId(sessionId);
-    setUploadedFiles([]); // Clear files when switching sessions
-    saveLastActiveChatSession(projectId!, stepId, documentId, sessionId); // Persist the selected session
-    const loadedMessages = await fetchMessagesForSession(sessionId);
-    setMessages(loadedMessages);
-    setIsLoadingHistory(false);
-    setIsHistoryCollapsed(true); // Collapse history after selection
-  }, [selectedChatSessionId, projectId, stepId, documentId, fetchMessagesForSession]);
+      setIsLoadingHistory(true);
+      setSelectedChatSessionId(sessionId);
+      setCurrentChatSessionId(sessionId);
+      setUploadedFiles([]);
+      if (projectId) {
+        saveLastActiveChatSession(projectId, stepId, documentId, sessionId);
+      }
+      const loadedMessages = await fetchMessagesForSession(sessionId);
+      setMessages(loadedMessages);
+      setIsLoadingHistory(false);
+      setIsHistoryCollapsed(true);
+    },
+    [selectedChatSessionId, projectId, stepId, documentId, fetchMessagesForSession],
+  );
 
-  // 3. Realtime Subscription
+  // realtime new messages in active session
   useEffect(() => {
     if (!currentChatSessionId) return;
 
@@ -243,9 +274,8 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
         },
         (payload) => {
           const newMsg = payload.new as any;
-          
           setMessages((prev) => {
-            if (prev.some(m => m.id === newMsg.id)) return prev;
+            if (prev.some((m) => m.id === newMsg.id)) return prev;
 
             let insertContent: string | undefined;
             let displayContent = newMsg.content;
@@ -257,27 +287,30 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
                   insertContent = parsed.insert_content;
                   displayContent = newMsg.content.replace(jsonBlockMatch[0], '').trim();
                 }
-              } catch (e) {
-                console.error("Failed to parse insert_content JSON block from realtime message:", e);
+              } catch {
+                // ignore
               }
             }
 
             let fileNames: string[] = [];
             const fileMatch = newMsg.content.match(/\(Files?: ([^)]+)\)/);
             if (fileMatch) {
-                fileNames = fileMatch[1].split(',').map((s: string) => s.trim());
+              fileNames = fileMatch[1].split(',').map((s: string) => s.trim());
             }
 
-            return [...prev, {
-              id: newMsg.id,
-              sender: newMsg.role === 'user' ? 'user' : 'ai',
-              text: displayContent,
-              timestamp: newMsg.created_at,
-              insertContent: insertContent,
-              uploadedFiles: fileNames.length > 0 ? fileNames : undefined,
-            }];
+            return [
+              ...prev,
+              {
+                id: newMsg.id,
+                sender: newMsg.role === 'user' ? 'user' : 'ai',
+                text: displayContent,
+                timestamp: newMsg.created_at,
+                insertContent,
+                uploadedFiles: fileNames.length > 0 ? fileNames : undefined,
+              },
+            ];
           });
-        }
+        },
       )
       .subscribe();
 
@@ -286,13 +319,11 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
     };
   }, [currentChatSessionId]);
 
-  // 4. Send Message
   const handleSendMessage = async (e?: React.FormEvent) => {
     e?.preventDefault();
     const text = inputMessage.trim();
     if (!text && uploadedFiles.length === 0) return;
     if (isSending) return;
-
     if (!projectId) {
       showError('Select a project to chat.');
       return;
@@ -302,22 +333,25 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
     setIsSending(true);
 
     const currentFiles = [...uploadedFiles];
-    setUploadedFiles([]); // Clear files immediately from UI for next message
+    setUploadedFiles([]);
 
     const tempUserMsgId = crypto.randomUUID();
     let userMsgText = text;
     if (currentFiles.length > 0) {
-      const fileNames = currentFiles.map(f => f.name).join(', ');
+      const fileNames = currentFiles.map((f) => f.name).join(', ');
       userMsgText = `(Files: ${fileNames}) ${text}`;
     }
 
-    setMessages(prev => [...prev, {
-      id: tempUserMsgId,
-      sender: 'user',
-      text: userMsgText,
-      timestamp: new Date().toISOString(),
-      uploadedFiles: currentFiles.map(f => f.name),
-    }]);
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: tempUserMsgId,
+        sender: 'user',
+        text: userMsgText,
+        timestamp: new Date().toISOString(),
+        uploadedFiles: currentFiles.map((f) => f.name),
+      },
+    ]);
 
     try {
       const response = await fetch(
@@ -336,7 +370,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
             documentId,
             chatSessionId: currentChatSessionId,
             stream: false,
-            uploadedFiles: currentFiles, // Send array of files
+            uploadedFiles: currentFiles,
           }),
         },
       );
@@ -346,31 +380,34 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
       }
 
       const data = await response.json();
-      
+
       if (data.chatSessionId && !currentChatSessionId) {
         setCurrentChatSessionId(data.chatSessionId);
-        setSelectedChatSessionId(data.chatSessionId); // Select the new session
-        saveLastActiveChatSession(projectId, stepId, documentId, data.chatSessionId); // Persist the new session
-        // Re-fetch sessions to include the new one in the list
+        setSelectedChatSessionId(data.chatSessionId);
+        saveLastActiveChatSession(projectId, stepId, documentId, data.chatSessionId);
+
         const { data: updatedSessions, error: updateError } = await supabase
           .from('chat_sessions')
           .select('id, created_at, updated_at')
           .eq('project_id', projectId)
           .order('updated_at', { ascending: false });
+
         if (!updateError && updatedSessions) {
           setAvailableChatSessions(updatedSessions);
         }
       }
 
-      setMessages(prev => [...prev, {
-        id: crypto.randomUUID(),
-        sender: 'ai',
-        text: data.reply,
-        timestamp: new Date().toISOString(),
-        sources: data.sources,
-        insertContent: data.insertContent,
-      }]);
-
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          sender: 'ai',
+          text: data.reply,
+          timestamp: new Date().toISOString(),
+          sources: data.sources,
+          insertContent: data.insertContent,
+        },
+      ]);
     } catch (err: any) {
       console.error('Chat Error:', err);
       showError('Failed to get response. Please try again.');
@@ -385,9 +422,48 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
     setSelectedChatSessionId(undefined);
     setInputMessage('');
     setUploadedFiles([]);
-    setIsHistoryCollapsed(true); // Collapse history when starting new chat
-    clearLastActiveChatSession(projectId!, stepId, documentId); // Clear persisted session
+    setIsHistoryCollapsed(true);
+    if (projectId) clearLastActiveChatSession(projectId, stepId, documentId);
     showSuccess('New chat session started.');
+  };
+
+  const handleDeleteSession = async (sessionId: string) => {
+    try {
+      // delete messages first, then session
+      const { error: msgErr } = await supabase
+        .from('chat_messages')
+        .delete()
+        .eq('chat_session_id', sessionId);
+      if (msgErr) throw msgErr;
+
+      const { error: sessionErr } = await supabase
+        .from('chat_sessions')
+        .delete()
+        .eq('id', sessionId);
+      if (sessionErr) throw sessionErr;
+
+      setAvailableChatSessions((prev) => prev.filter((s) => s.id !== sessionId));
+
+      if (sessionId === currentChatSessionId) {
+        setCurrentChatSessionId(undefined);
+        setMessages([]);
+      }
+      if (sessionId === selectedChatSessionId) {
+        setSelectedChatSessionId(undefined);
+      }
+
+      if (projectId) {
+        const lastStored = getLastActiveChatSession(projectId, stepId, documentId);
+        if (lastStored === sessionId) {
+          clearLastActiveChatSession(projectId, stepId, documentId);
+        }
+      }
+
+      showSuccess('Chat deleted.');
+    } catch (error: any) {
+      console.error('Failed to delete chat session:', error);
+      showError(`Failed to delete chat: ${error.message}`);
+    }
   };
 
   const renderMessageContent = (text: string) => {
@@ -396,7 +472,11 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
     return parts.map((part, i) => {
       const match = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
       if (match) {
-        return <Link key={i} to={match[2]} className="text-blue-500 hover:underline">{match[1]}</Link>;
+        return (
+          <Link key={i} to={match[2]} className="text-blue-500 hover:underline">
+            {match[1]}
+          </Link>
+        );
       }
       return part;
     });
@@ -416,7 +496,10 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
         </CollapsibleTrigger>
         <CollapsibleContent className="mt-2 space-y-2 animate-accordion-down">
           {sources.map((source, i) => (
-            <div key={i} className="rounded bg-background/50 p-2 text-xs border border-border/50">
+            <div
+              key={i}
+              className="rounded bg-background/50 p-2 text-xs border border-border/50"
+            >
               <div className="font-medium mb-0.5">{source.document_name}</div>
               <div className="text-muted-foreground line-clamp-2 text-[10px] italic">
                 "{source.chunk_preview}"
@@ -447,7 +530,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      if (file.size > 1024 * 1024 * 5) { // 5MB limit per file
+      if (file.size > 1024 * 1024 * 5) {
         showError(`File "${file.name}" exceeds 5MB limit and was skipped.`);
         continue;
       }
@@ -466,7 +549,8 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
             reader.onload = (e) => resolve(e.target?.result as string);
             reader.readAsText(file);
           });
-          fileContent = new DOMParser().parseFromString(fileContent, 'text/html').body.textContent || '';
+          fileContent =
+            new DOMParser().parseFromString(fileContent, 'text/html').body.textContent || '';
         } else if (fileExtension === 'md' || fileExtension === 'txt') {
           fileContent = await new Promise<string>((resolve) => {
             const reader = new FileReader();
@@ -477,19 +561,19 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
           const arrayBuffer = await file.arrayBuffer();
           const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
           const pdf = await loadingTask.promise;
-          
+
           let fullText = '';
-          const maxPages = Math.min(pdf.numPages, 10); 
-          
+          const maxPages = Math.min(pdf.numPages, 10);
+
           for (let p = 1; p <= maxPages; p++) {
             const page = await pdf.getPage(p);
             const textContent = await page.getTextContent();
-            const pageText = textContent.items
-              .map((item: any) => item.str)
+            const pageText = (textContent.items as any[])
+              .map((item) => item.str)
               .join(' ');
             fullText += pageText + '\n\n';
           }
-          
+
           if (pdf.numPages > maxPages) {
             fullText += `\n[...PDF truncated after ${maxPages} pages...]`;
           }
@@ -507,7 +591,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
     }
 
     if (newUploadedFiles.length > 0) {
-      setUploadedFiles(prev => [...prev, ...newUploadedFiles]);
+      setUploadedFiles((prev) => [...prev, ...newUploadedFiles]);
       showSuccess(`${newUploadedFiles.length} file(s) added.`);
     }
 
@@ -517,7 +601,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
   };
 
   const handleRemoveFile = (index: number) => {
-    setUploadedFiles(prev => prev.filter((_, i) => i !== index));
+    setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleUseThisContent = (content: string) => {
@@ -529,15 +613,20 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
     showSuccess('Content sent to editor. Check the document editor panel!');
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  // Shift+Enter => line break, Enter => send
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && e.shiftKey) {
-      e.preventDefault(); // Prevent form submission
-      setInputMessage(prev => prev + '\n'); // Insert a newline
-    } else if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault(); // Prevent default behavior (newline in input)
-      handleSendMessage(); // Manually trigger send
+      // allow native newline
+      return;
+    }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage();
     }
   };
+
+  const hasActiveComposer =
+    !!currentChatSessionId || inputMessage.trim().length > 0 || uploadedFiles.length > 0;
 
   return (
     <Card className="flex flex-col h-full border-none shadow-none bg-transparent">
@@ -550,7 +639,12 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" onClick={handleNewChat} className="h-8 w-8">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleNewChat}
+                  className="h-8 w-8"
+                >
                   <PlusCircle className="h-4 w-4 text-muted-foreground" />
                 </Button>
               </TooltipTrigger>
@@ -560,7 +654,12 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" onClick={() => setIsHistoryCollapsed(prev => !prev)} className="h-8 w-8">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setIsHistoryCollapsed((prev) => !prev)}
+                  className="h-8 w-8"
+                >
                   <HistoryIcon className="h-4 w-4 text-muted-foreground" />
                 </Button>
               </TooltipTrigger>
@@ -572,31 +671,71 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
 
       <CardContent className="flex-1 p-0 overflow-hidden relative bg-background/50">
         <ScrollArea className="h-full p-4">
-          <Collapsible open={!isHistoryCollapsed} onOpenChange={setIsHistoryCollapsed} className="mb-4">
+          <Collapsible
+            open={!isHistoryCollapsed}
+            onOpenChange={setIsHistoryCollapsed}
+            className="mb-4"
+          >
             <CollapsibleContent className="space-y-2 animate-accordion-down">
               {isLoadingSessions ? (
-                <div className="text-center text-muted-foreground py-4">Loading sessions...</div>
+                <div className="text-center text-muted-foreground py-4">
+                  Loading sessions...
+                </div>
               ) : availableChatSessions.length > 0 ? (
                 <div className="space-y-2">
-                  {availableChatSessions.map(sessionItem => (
-                    <Button
+                  {availableChatSessions.map((sessionItem) => (
+                    <div
                       key={sessionItem.id}
-                      variant={sessionItem.id === selectedChatSessionId ? 'secondary' : 'ghost'}
-                      className="w-full justify-start text-sm h-auto py-2 px-3"
-                      onClick={() => handleSelectSession(sessionItem.id)}
+                      className="flex items-center gap-2"
                     >
-                      <HistoryIcon className="h-4 w-4 mr-2 opacity-70" />
-                      <span className="flex-1 text-left truncate">
-                        Chat from {new Date(sessionItem.created_at).toLocaleString()}
-                      </span>
-                      {sessionItem.id === selectedChatSessionId && (
-                        <Badge variant="outline" className="ml-2">Active</Badge>
-                      )}
-                    </Button>
+                      <Button
+                        type="button"
+                        variant={
+                          sessionItem.id === selectedChatSessionId
+                            ? 'secondary'
+                            : 'ghost'
+                        }
+                        className="flex-1 justify-start text-sm h-auto py-2 px-3"
+                        onClick={() => handleSelectSession(sessionItem.id)}
+                      >
+                        <HistoryIcon className="h-4 w-4 mr-2 opacity-70" />
+                        <span className="flex-1 text-left truncate">
+                          Chat from{' '}
+                          {new Date(
+                            sessionItem.created_at,
+                          ).toLocaleString()}
+                        </span>
+                        {sessionItem.id === selectedChatSessionId && (
+                          <Badge variant="outline" className="ml-2">
+                            Active
+                          </Badge>
+                        )}
+                      </Button>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              className="h-8 w-8 text-destructive"
+                              onClick={() => handleDeleteSession(sessionItem.id)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="top">
+                            Delete this chat
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </div>
                   ))}
                 </div>
               ) : (
-                <p className="text-center text-muted-foreground italic py-4">No past chats for this context.</p>
+                <p className="text-center text-muted-foreground italic py-4">
+                  No past chats for this context.
+                </p>
               )}
             </CollapsibleContent>
           </Collapsible>
@@ -606,40 +745,57 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
               <div className="flex flex-col items-center justify-center h-[300px] text-center text-muted-foreground px-8">
                 <Bot className="h-12 w-12 mb-3 opacity-20" />
                 <p>Ask StrategistAI about your project.</p>
-                <p className="text-sm mt-2">Upload files (PDF, DOCX, MD) to get analysis.</p>
+                <p className="text-sm mt-2">
+                  Upload files (PDF, DOCX, MD) to get analysis.
+                </p>
               </div>
             )}
 
             {messages.map((msg) => (
-              <div key={msg.id} className={cn('flex w-full gap-3', msg.sender === 'user' ? 'justify-end' : 'justify-start')}>
+              <div
+                key={msg.id}
+                className={cn(
+                  'flex w-full gap-3',
+                  msg.sender === 'user' ? 'justify-end' : 'justify-start',
+                )}
+              >
                 {msg.sender === 'ai' && (
                   <div className="h-8 w-8 rounded-full bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center flex-shrink-0 mt-1">
                     <Bot className="h-5 w-5 text-blue-600 dark:text-blue-400" />
                   </div>
                 )}
-                
-                <div className={cn(
-                  'relative px-4 py-3 rounded-2xl max-w-[85%] shadow-sm text-sm leading-relaxed',
-                  msg.sender === 'user' 
-                    ? 'bg-primary text-primary-foreground rounded-tr-sm' 
-                    : 'bg-card border border-border text-card-foreground rounded-tl-sm'
-                )}>
-                  {/* Display attached files if any */}
-                  {msg.uploadedFiles && msg.uploadedFiles.length > 0 && msg.sender === 'user' && (
-                    <div className="flex flex-wrap gap-2 mb-2">
-                      {msg.uploadedFiles.map((fileName, idx) => (
-                        <Badge key={idx} variant="secondary" className="bg-primary-foreground/10 hover:bg-primary-foreground/20 text-primary-foreground border-0">
-                          <Paperclip className="h-3 w-3 mr-1" />
-                          {fileName}
-                        </Badge>
-                      ))}
-                    </div>
+
+                <div
+                  className={cn(
+                    'relative px-4 py-3 rounded-2xl max-w-[85%] shadow-sm text-sm leading-relaxed',
+                    msg.sender === 'user'
+                      ? 'bg-primary text-primary-foreground rounded-tr-sm'
+                      : 'bg-card border border-border text-card-foreground rounded-tl-sm',
                   )}
-                  
+                >
+                  {msg.uploadedFiles &&
+                    msg.uploadedFiles.length > 0 &&
+                    msg.sender === 'user' && (
+                      <div className="flex flex-wrap gap-2 mb-2">
+                        {msg.uploadedFiles.map((fileName, idx) => (
+                          <Badge
+                            key={idx}
+                            variant="secondary"
+                            className="bg-primary-foreground/10 hover:bg-primary-foreground/20 text-primary-foreground border-0"
+                          >
+                            <Paperclip className="h-3 w-3 mr-1" />
+                            {fileName}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+
                   <div className="whitespace-pre-wrap break-words">
-                    {renderMessageContent(msg.text.replace(/^\(Files: .*?\) /, ''))}
+                    {renderMessageContent(
+                      msg.text.replace(/^\(Files: .*?\) /, ''),
+                    )}
                   </div>
-                  
+
                   {msg.sender === 'ai' && msg.insertContent && documentId && (
                     <Button
                       variant="secondary"
@@ -652,8 +808,11 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
                     </Button>
                   )}
                   {msg.sender === 'ai' && renderSources(msg.sources)}
-                  <div className={cn("text-[10px] mt-1 text-right opacity-70")}>
-                    {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  <div className="text-[10px] mt-1 text-right opacity-70">
+                    {new Date(msg.timestamp).toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
                   </div>
                 </div>
 
@@ -664,7 +823,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
                 )}
               </div>
             ))}
-            
+
             {isSending && (
               <div className="flex w-full gap-3 justify-start animate-pulse">
                 <div className="h-8 w-8 rounded-full bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center flex-shrink-0 mt-1">
@@ -687,7 +846,11 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
             <Badge key={index} variant="secondary" className="flex items-center gap-1">
               <Paperclip className="h-3 w-3" />
               <span className="max-w-[100px] truncate">{file.name}</span>
-              <button onClick={() => handleRemoveFile(index)} className="ml-1 hover:text-destructive">
+              <button
+                type="button"
+                onClick={() => handleRemoveFile(index)}
+                className="ml-1 hover:text-destructive"
+              >
                 <X className="h-3 w-3" />
               </button>
             </Badge>
@@ -695,51 +858,72 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
         </div>
       )}
 
-      {/* Input */}
-      <CardFooter className="p-4 pt-2 border-t border-border bg-background">
-        <form onSubmit={handleSendMessage} className="flex w-full gap-2">
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleFileChange}
-            style={{ display: 'none' }}
-            multiple // Enable multiple file selection
-            accept=".docx,.html,.md,.txt,.pdf"
-          />
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant={uploadedFiles.length > 0 ? "secondary" : "outline"}
-                  size="icon"
-                  onClick={handleFileUploadClick}
-                  disabled={isSending}
-                  className="shrink-0"
-                >
-                  <Paperclip className="h-4 w-4" />
-                  <span className="sr-only">Attach File</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="top">Attach Files (.docx, .pdf, .html, .md, .txt)</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-          <Input
-            id="tour-ai-chat-input"
-            placeholder={uploadedFiles.length > 0 ? `Ask about ${uploadedFiles.length} file(s) or type message...` : "Ask a question..."}
-            value={inputMessage}
-            onChange={(e) => setInputMessage(e.target.value)}
-            onKeyDown={handleKeyDown} // Add the new keydown handler here
-            disabled={isSending}
-            className="flex-1"
-            autoComplete="off"
-          />
-          <Button type="submit" size="icon" disabled={(!inputMessage.trim() && uploadedFiles.length === 0) || isSending}>
-            {isSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            <span className="sr-only">Send</span>
-          </Button>
-        </form>
-      </CardFooter>
+      {/* Input – only show when there is an active chat or the user has started composing */}
+      {hasActiveComposer && (
+        <CardFooter className="p-4 pt-2 border-t border-border bg-background">
+          <form onSubmit={handleSendMessage} className="flex w-full gap-2 items-end">
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileChange}
+              style={{ display: 'none' }}
+              multiple
+              accept=".docx,.html,.md,.txt,.pdf"
+            />
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant={uploadedFiles.length > 0 ? 'secondary' : 'outline'}
+                    size="icon"
+                    onClick={handleFileUploadClick}
+                    disabled={isSending}
+                    className="shrink-0"
+                  >
+                    <Paperclip className="h-4 w-4" />
+                    <span className="sr-only">Attach File</span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  Attach Files (.docx, .pdf, .html, .md, .txt)
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+
+            <div className="flex-1">
+              <textarea
+                id="tour-ai-chat-input"
+                placeholder={
+                  uploadedFiles.length > 0
+                    ? `Ask about ${uploadedFiles.length} file(s) or type message...`
+                    : 'Ask a question... (Enter = send, Shift+Enter = new line)'
+                }
+                value={inputMessage}
+                onChange={(e) => setInputMessage(e.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={isSending}
+                className="w-full min-h-[40px] max-h-32 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              />
+            </div>
+
+            <Button
+              type="submit"
+              size="icon"
+              disabled={
+                (!inputMessage.trim() && uploadedFiles.length === 0) || isSending
+              }
+            >
+              {isSending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4" />
+              )}
+              <span className="sr-only">Send</span>
+            </Button>
+          </form>
+        </CardFooter>
+      )}
     </Card>
   );
 };

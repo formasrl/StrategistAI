@@ -12,8 +12,8 @@ interface AiPanelProps {
   phaseId?: string;
   stepId?: string;
   documentId?: string;
-  contentToInsert: string | null; // New prop
-  setContentToInsert: (content: string | null) => void; // New prop
+  contentToInsert: string | null;
+  setContentToInsert: (content: string | null) => void;
 }
 
 const AiPanel: React.FC<AiPanelProps> = ({
@@ -21,7 +21,7 @@ const AiPanel: React.FC<AiPanelProps> = ({
   phaseId,
   stepId,
   documentId,
-  contentToInsert,
+  contentToInsert: _contentToInsert, // not needed directly here
   setContentToInsert,
 }) => {
   return (
@@ -43,7 +43,6 @@ const AiPanel: React.FC<AiPanelProps> = ({
           phaseId={phaseId}
           stepId={stepId}
           documentId={documentId}
-          contentToInsert={contentToInsert}
           setContentToInsert={setContentToInsert}
         />
       </TabsContent>
@@ -52,10 +51,7 @@ const AiPanel: React.FC<AiPanelProps> = ({
         className="mt-0 flex h-full min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden"
       >
         <ScrollArea className="flex-1 pr-2">
-          <AiPanelContent
-            documentId={documentId}
-            projectId={projectId}
-          />
+          <AiPanelContent documentId={documentId} projectId={projectId} />
         </ScrollArea>
       </TabsContent>
     </Tabs>
