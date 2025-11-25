@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { MessageCircle, Send, Loader2, Bot, User, BookOpen, RefreshCw, ChevronDown, Paperclip, PlusCircle } from 'lucide-react';
+import { MessageCircle, Send, Loader2, Bot, User, BookOpen, RefreshCw, ChevronDown, Paperclip, PlusCircle, X } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { supabase } from '@/integrations/supabase/client';
 import { useSession } from '@/integrations/supabase/SessionContextProvider';
@@ -20,13 +20,14 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { Badge } from "@/components/ui/badge";
 
 import mammoth from 'mammoth'; // For .docx
 // pdfjs-dist import
 import * as pdfjsLib from 'pdfjs-dist';
 
-// Set worker source - utilizing a CDN for simplicity in this environment to avoid build config issues
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.js`;
+// Set worker source explicitly to 4.4.168 CDN version to match package.json
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs`;
 
 interface ChatSource {
   document_name: string;
@@ -40,8 +41,9 @@ interface ChatMessage {
   text: string;
   timestamp: string;
   sources?: ChatSource[];
-  insertContent?: string; // New: content AI wants to insert into editor
-  uploadedFileName?: string; // New: name of file uploaded by user
+  insertContent?: string;
+  uploadedFileName?: string; // Keeping for backward compatibility
+  uploadedFiles?: string[]; // New: array of file names
 }
 
 interface AiChatbotProps {
@@ -53,6 +55,11 @@ interface AiChatbotProps {
   setContentToInsert: (content: string | null) => void;
 }
 
+interface UploadedFile {
+  name: string;
+  content: string;
+}
+
 const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, documentId, setContentToInsert }) => {
   const { session } = useSession();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -60,17 +67,17 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
   const [isSending, setIsSending] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [currentChatSessionId, setCurrentChatSessionId] = useState<string | undefined>(undefined);
-  const [uploadedFile, setUploadedFile] = useState<{ name: string; content: string } | null>(null); // New state for uploaded file
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null); // Ref for hidden file input
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 1. Auto-scroll
   useEffect(() => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
-  }, [messages, isSending]);
+  }, [messages, isSending, uploadedFiles]);
 
   // 2. Fetch History & Determine Session ID
   useEffect(() => {
@@ -83,7 +90,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
         setIsLoadingHistory(true);
         setMessages([]);
         setCurrentChatSessionId(undefined);
-        setUploadedFile(null); // Clear uploaded file on context change
+        setUploadedFiles([]);
       }
 
       try {
@@ -135,6 +142,17 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
                 }
               }
 
+              // Heuristic to find file names in old messages (backward compat)
+              let fileNames: string[] = [];
+              const fileMatch = msg.content.match(/\(Files?: ([^)]+)\)/);
+              if (fileMatch) {
+                fileNames = fileMatch[1].split(',').map(s => s.trim());
+              } else if (msg.content.match(/^\(File: .+\)/)) {
+                 // Legacy format check
+                 const legacyMatch = msg.content.match(/^\(File: (.+?)\)/);
+                 if (legacyMatch) fileNames = [legacyMatch[1]];
+              }
+
               return {
                 id: msg.id,
                 sender: msg.role === 'user' ? 'user' : 'ai',
@@ -142,6 +160,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
                 timestamp: msg.created_at,
                 sources: [], 
                 insertContent: insertContent,
+                uploadedFiles: fileNames.length > 0 ? fileNames : undefined,
               };
             }));
           }
@@ -158,7 +177,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
     return () => { isMounted = false; };
   }, [projectId, stepId, documentId]);
 
-  // 3. Realtime Subscription (Reactive to currentChatSessionId)
+  // 3. Realtime Subscription
   useEffect(() => {
     if (!currentChatSessionId) return;
 
@@ -176,10 +195,8 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
           const newMsg = payload.new as any;
           
           setMessages((prev) => {
-            // Deduplicate based on ID to prevent double-adding (optimistic + realtime)
             if (prev.some(m => m.id === newMsg.id)) return prev;
 
-            // Parse for insert_content from the full message content
             let insertContent: string | undefined;
             let displayContent = newMsg.content;
             const jsonBlockMatch = newMsg.content.match(/```json\n?({[\s\S]*?})\n?```/);
@@ -195,12 +212,20 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
               }
             }
 
+            // Parse files for display
+            let fileNames: string[] = [];
+            const fileMatch = newMsg.content.match(/\(Files?: ([^)]+)\)/);
+            if (fileMatch) {
+                fileNames = fileMatch[1].split(',').map((s: string) => s.trim());
+            }
+
             return [...prev, {
               id: newMsg.id,
               sender: newMsg.role === 'user' ? 'user' : 'ai',
               text: displayContent,
               timestamp: newMsg.created_at,
               insertContent: insertContent,
+              uploadedFiles: fileNames.length > 0 ? fileNames : undefined,
             }];
           });
         }
@@ -212,11 +237,11 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
     };
   }, [currentChatSessionId]);
 
-  // 4. Send Message (Force JSON Mode)
+  // 4. Send Message
   const handleSendMessage = async (e?: React.FormEvent) => {
     e?.preventDefault();
     const text = inputMessage.trim();
-    if (!text && !uploadedFile) return; // Allow sending only file
+    if (!text && uploadedFiles.length === 0) return;
     if (isSending) return;
 
     if (!projectId) {
@@ -227,14 +252,23 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
     setInputMessage('');
     setIsSending(true);
 
-    // Optimistic Update (User Message)
+    const currentFiles = [...uploadedFiles];
+    // Clear files immediately from UI for next message
+    setUploadedFiles([]);
+
     const tempUserMsgId = crypto.randomUUID();
+    let userMsgText = text;
+    if (currentFiles.length > 0) {
+      const fileNames = currentFiles.map(f => f.name).join(', ');
+      userMsgText = `(Files: ${fileNames}) ${text}`;
+    }
+
     setMessages(prev => [...prev, {
       id: tempUserMsgId,
       sender: 'user',
-      text: uploadedFile ? `(File: ${uploadedFile.name}) ${text}` : text,
+      text: userMsgText,
       timestamp: new Date().toISOString(),
-      uploadedFileName: uploadedFile?.name,
+      uploadedFiles: currentFiles.map(f => f.name),
     }]);
 
     try {
@@ -253,9 +287,8 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
             stepId,
             documentId,
             chatSessionId: currentChatSessionId,
-            stream: false, // FORCE JSON RESPONSE for stability
-            uploadedFileContent: uploadedFile?.content, // New: Pass uploaded file content
-            uploadedFileName: uploadedFile?.name, // New: Pass uploaded file name
+            stream: false,
+            uploadedFiles: currentFiles, // Send array of files
           }),
         },
       );
@@ -266,28 +299,24 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
 
       const data = await response.json();
       
-      // Update Session ID if newly created
       if (data.chatSessionId && !currentChatSessionId) {
         setCurrentChatSessionId(data.chatSessionId);
       }
 
-      // Add AI Response to State
       setMessages(prev => [...prev, {
         id: crypto.randomUUID(),
         sender: 'ai',
         text: data.reply,
         timestamp: new Date().toISOString(),
         sources: data.sources,
-        insertContent: data.insertContent, // New: Store content for insertion
+        insertContent: data.insertContent,
       }]);
 
     } catch (err: any) {
       console.error('Chat Error:', err);
       showError('Failed to get response. Please try again.');
-      // Optionally remove optimistic message or show error state
     } finally {
       setIsSending(false);
-      setUploadedFile(null); // Clear uploaded file after sending
     }
   };
 
@@ -295,11 +324,10 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
     setMessages([]);
     setCurrentChatSessionId(undefined);
     setInputMessage('');
-    setUploadedFile(null); // Clear uploaded file on new chat
+    setUploadedFiles([]);
   };
 
   const renderMessageContent = (text: string) => {
-    // Simple markdown link parser
     if (!text) return null;
     const parts = text.split(/(\[[^\]]+\]\([^)]+\))/g);
     return parts.map((part, i) => {
@@ -344,84 +372,89 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
     return 'Chat';
   };
 
-  // File upload handlers
   const handleFileUploadClick = () => {
     fileInputRef.current?.click();
   };
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
 
-    if (file.size > 1024 * 1024 * 10) { // 10MB limit
-      showError('File size exceeds 10MB limit.');
-      return;
-    }
+    const newUploadedFiles: UploadedFile[] = [];
 
-    const fileExtension = file.name.split('.').pop()?.toLowerCase();
-    let fileContent = '';
-
-    try {
-      if (fileExtension === 'docx') {
-        const arrayBuffer = await file.arrayBuffer();
-        const result = await mammoth.extractRawText({ arrayBuffer });
-        fileContent = result.value;
-      } else if (fileExtension === 'html') {
-        fileContent = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onload = (e) => resolve(e.target?.result as string);
-          reader.readAsText(file);
-        });
-        // Strip tags for chat context, or keep structural tags? 
-        // For the chat model to understand, raw text is usually best, but simple HTML is okay.
-        // Let's strip tags to keep token count low and relevance high.
-        fileContent = new DOMParser().parseFromString(fileContent, 'text/html').body.textContent || '';
-      } else if (fileExtension === 'md') {
-        fileContent = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onload = (e) => resolve(e.target?.result as string);
-          reader.readAsText(file);
-        });
-      } else if (fileExtension === 'pdf') {
-        // PDF Handling
-        const arrayBuffer = await file.arrayBuffer();
-        const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
-        const pdf = await loadingTask.promise;
-        
-        let fullText = '';
-        // Limit pages to avoid massive token loads
-        const maxPages = Math.min(pdf.numPages, 15); 
-        
-        for (let i = 1; i <= maxPages; i++) {
-          const page = await pdf.getPage(i);
-          const textContent = await page.getTextContent();
-          const pageText = textContent.items
-            .map((item: any) => item.str)
-            .join(' ');
-          fullText += pageText + '\n\n';
-        }
-        
-        if (pdf.numPages > maxPages) {
-          fullText += `\n[...PDF truncated after ${maxPages} pages...]`;
-        }
-        
-        fileContent = fullText;
-      } else {
-        showError('Unsupported file type. Please upload .docx, .pdf, .html, or .md files.');
-        return;
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (file.size > 1024 * 1024 * 5) { // 5MB limit per file
+        showError(`File "${file.name}" exceeds 5MB limit and was skipped.`);
+        continue;
       }
 
-      setUploadedFile({ name: file.name, content: fileContent });
-      showSuccess(`File "${file.name}" loaded for chat.`);
-    } catch (error: any) {
-      console.error('File processing error:', error);
-      showError(`Failed to process file: ${error.message}`);
-      setUploadedFile(null);
-    } finally {
-      if (fileInputRef.current) {
-        fileInputRef.current.value = ''; // Clear the file input
+      const fileExtension = file.name.split('.').pop()?.toLowerCase();
+      let fileContent = '';
+
+      try {
+        if (fileExtension === 'docx') {
+          const arrayBuffer = await file.arrayBuffer();
+          const result = await mammoth.extractRawText({ arrayBuffer });
+          fileContent = result.value;
+        } else if (fileExtension === 'html') {
+          fileContent = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target?.result as string);
+            reader.readAsText(file);
+          });
+          fileContent = new DOMParser().parseFromString(fileContent, 'text/html').body.textContent || '';
+        } else if (fileExtension === 'md' || fileExtension === 'txt') {
+          fileContent = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target?.result as string);
+            reader.readAsText(file);
+          });
+        } else if (fileExtension === 'pdf') {
+          const arrayBuffer = await file.arrayBuffer();
+          const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+          const pdf = await loadingTask.promise;
+          
+          let fullText = '';
+          const maxPages = Math.min(pdf.numPages, 10); 
+          
+          for (let p = 1; p <= maxPages; p++) {
+            const page = await pdf.getPage(p);
+            const textContent = await page.getTextContent();
+            const pageText = textContent.items
+              .map((item: any) => item.str)
+              .join(' ');
+            fullText += pageText + '\n\n';
+          }
+          
+          if (pdf.numPages > maxPages) {
+            fullText += `\n[...PDF truncated after ${maxPages} pages...]`;
+          }
+          fileContent = fullText;
+        } else {
+          showError(`Unsupported file type: ${file.name}`);
+          continue;
+        }
+
+        newUploadedFiles.push({ name: file.name, content: fileContent });
+      } catch (error: any) {
+        console.error(`Error processing ${file.name}:`, error);
+        showError(`Failed to process ${file.name}: ${error.message}`);
       }
     }
+
+    if (newUploadedFiles.length > 0) {
+      setUploadedFiles(prev => [...prev, ...newUploadedFiles]);
+      showSuccess(`${newUploadedFiles.length} file(s) added.`);
+    }
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleRemoveFile = (index: number) => {
+    setUploadedFiles(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleUseThisContent = (content: string) => {
@@ -435,7 +468,6 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
 
   return (
     <Card className="flex flex-col h-full border-none shadow-none bg-transparent">
-      {/* Header */}
       <CardHeader className="p-4 pb-2 border-b border-border flex flex-row items-center justify-between space-y-0 shrink-0">
         <CardTitle className="text-lg font-semibold flex items-center gap-2">
           <MessageCircle className="h-5 w-5 text-blue-500" />
@@ -453,7 +485,6 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
         </TooltipProvider>
       </CardHeader>
 
-      {/* Messages */}
       <CardContent className="flex-1 p-0 overflow-hidden relative bg-background/50">
         <ScrollArea className="h-full p-4">
           <div className="space-y-6 pb-4 min-h-[200px]">
@@ -461,7 +492,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
               <div className="flex flex-col items-center justify-center h-[300px] text-center text-muted-foreground px-8">
                 <Bot className="h-12 w-12 mb-3 opacity-20" />
                 <p>Ask StrategistAI about your project.</p>
-                <p className="text-sm mt-2">Upload a PDF, DOCX, or MD file to get analysis.</p>
+                <p className="text-sm mt-2">Upload files (PDF, DOCX, MD) to get analysis.</p>
               </div>
             )}
 
@@ -479,20 +510,27 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
                     ? 'bg-primary text-primary-foreground rounded-tr-sm' 
                     : 'bg-card border border-border text-card-foreground rounded-tl-sm'
                 )}>
-                  {msg.uploadedFileName && msg.sender === 'user' && (
-                    <div className="flex items-center text-xs text-muted-foreground mb-1">
-                      <Paperclip className="h-3 w-3 mr-1" />
-                      <span>{msg.uploadedFileName}</span>
+                  {/* Display attached files if any */}
+                  {msg.uploadedFiles && msg.uploadedFiles.length > 0 && msg.sender === 'user' && (
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      {msg.uploadedFiles.map((fileName, idx) => (
+                        <Badge key={idx} variant="secondary" className="bg-primary-foreground/10 hover:bg-primary-foreground/20 text-primary-foreground border-0">
+                          <Paperclip className="h-3 w-3 mr-1" />
+                          {fileName}
+                        </Badge>
+                      ))}
                     </div>
                   )}
+                  
                   <div className="whitespace-pre-wrap break-words">
-                    {renderMessageContent(msg.text)}
+                    {renderMessageContent(msg.text.replace(/^\(Files: .*?\) /, ''))}
                   </div>
+                  
                   {msg.sender === 'ai' && msg.insertContent && documentId && (
                     <Button
                       variant="secondary"
                       size="sm"
-                      className="mt-2 w-full"
+                      className="mt-2 w-full bg-green-100 text-green-800 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-300 dark:hover:bg-green-900/50"
                       onClick={() => handleUseThisContent(msg.insertContent!)}
                     >
                       <PlusCircle className="mr-2 h-4 w-4" />
@@ -528,6 +566,21 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
         </ScrollArea>
       </CardContent>
 
+      {/* File List Preview */}
+      {uploadedFiles.length > 0 && (
+        <div className="px-4 py-2 bg-background border-t border-border flex flex-wrap gap-2 max-h-24 overflow-y-auto">
+          {uploadedFiles.map((file, index) => (
+            <Badge key={index} variant="secondary" className="flex items-center gap-1">
+              <Paperclip className="h-3 w-3" />
+              <span className="max-w-[100px] truncate">{file.name}</span>
+              <button onClick={() => handleRemoveFile(index)} className="ml-1 hover:text-destructive">
+                <X className="h-3 w-3" />
+              </button>
+            </Badge>
+          ))}
+        </div>
+      )}
+
       {/* Input */}
       <CardFooter className="p-4 pt-2 border-t border-border bg-background">
         <form onSubmit={handleSendMessage} className="flex w-full gap-2">
@@ -536,14 +589,15 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
             ref={fileInputRef}
             onChange={handleFileChange}
             style={{ display: 'none' }}
-            accept=".docx,.html,.md,.pdf"
+            multiple // Enable multiple file selection
+            accept=".docx,.html,.md,.txt,.pdf"
           />
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
                   type="button"
-                  variant="outline"
+                  variant={uploadedFiles.length > 0 ? "secondary" : "outline"}
                   size="icon"
                   onClick={handleFileUploadClick}
                   disabled={isSending}
@@ -553,19 +607,19 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
                   <span className="sr-only">Attach File</span>
                 </Button>
               </TooltipTrigger>
-              <TooltipContent side="top">Attach Document (.docx, .pdf, .html, .md)</TooltipContent>
+              <TooltipContent side="top">Attach Files (.docx, .pdf, .html, .md, .txt)</TooltipContent>
             </Tooltip>
           </TooltipProvider>
           <Input
             id="tour-ai-chat-input"
-            placeholder={uploadedFile ? `Ask about "${uploadedFile.name}" or type message...` : "Ask a question..."}
+            placeholder={uploadedFiles.length > 0 ? `Ask about ${uploadedFiles.length} file(s) or type message...` : "Ask a question..."}
             value={inputMessage}
             onChange={(e) => setInputMessage(e.target.value)}
             disabled={isSending}
             className="flex-1"
             autoComplete="off"
           />
-          <Button type="submit" size="icon" disabled={(!inputMessage.trim() && !uploadedFile) || isSending}>
+          <Button type="submit" size="icon" disabled={(!inputMessage.trim() && uploadedFiles.length === 0) || isSending}>
             {isSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             <span className="sr-only">Send</span>
           </Button>
