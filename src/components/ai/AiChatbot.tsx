@@ -529,6 +529,16 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
     showSuccess('Content sent to editor. Check the document editor panel!');
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && e.shiftKey) {
+      e.preventDefault(); // Prevent form submission
+      setInputMessage(prev => prev + '\n'); // Insert a newline
+    } else if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault(); // Prevent default behavior (newline in input)
+      handleSendMessage(); // Manually trigger send
+    }
+  };
+
   return (
     <Card className="flex flex-col h-full border-none shadow-none bg-transparent">
       <CardHeader className="p-4 pb-2 border-b border-border flex flex-row items-center justify-between space-y-0 shrink-0">
@@ -719,6 +729,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
             placeholder={uploadedFiles.length > 0 ? `Ask about ${uploadedFiles.length} file(s) or type message...` : "Ask a question..."}
             value={inputMessage}
             onChange={(e) => setInputMessage(e.target.value)}
+            onKeyDown={handleKeyDown} // Add the new keydown handler here
             disabled={isSending}
             className="flex-1"
             autoComplete="off"
