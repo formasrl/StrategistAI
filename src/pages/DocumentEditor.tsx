@@ -16,15 +16,14 @@ import { AiReview, Document } from '@/types/supabase';
 import './DocumentEditor.css';
 import { cn } from '@/lib/utils';
 
-import html2canvas from 'html2canvas'; // Import html2canvas
-import jsPDF from 'jspdf'; // Import jspdf
-import { marked } from 'marked'; // Import marked for Markdown to HTML conversion
-import DOMPurify from 'dompurify'; // Import DOMPurify for sanitization
-import mammoth from 'mammoth'; // Import mammoth for docx parsing
-import * as pdfjsLib from 'pdfjs-dist'; // Import pdfjs-dist for PDF parsing
-import { saveLastActiveStep } from '@/utils/localStorage'; // Import localStorage utility
+import html2canvas from 'html2canvas';
+import jsPDF from 'jspdf';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
+import mammoth from 'mammoth';
+import * as pdfjsLib from 'pdfjs-dist';
+import { saveLastActiveStep } from '@/utils/localStorage';
 
-// Set worker source explicitly to 4.4.168 CDN version to match package.json
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs`;
 
 type DashboardOutletContext = {
@@ -32,8 +31,8 @@ type DashboardOutletContext = {
   setIsAiReviewLoading?: (isLoading: boolean) => void;
   setDocumentIdForAiPanel?: (docId: string | undefined) => void;
   setStepIdForAiPanel?: (stepId: string | undefined) => void;
-  setContentToInsert?: (content: string | null) => void; // New: Function to set content for editor
-  contentToInsert?: string | null; // New: Content to insert
+  setContentToInsert?: (content: string | null) => void;
+  contentToInsert?: string | null;
 };
 
 interface DocumentEditorProps {
@@ -61,7 +60,6 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
   const currentDocumentId = propDocumentId ?? routeParams.documentId;
   const navigate = useNavigate();
 
-  // Suppress ReactQuill's deprecated findDOMNode warning
   useEffect(() => {
     const originalError = console.error;
     console.error = (...args) => {
@@ -81,8 +79,8 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
     setIsAiReviewLoading: contextSetIsAiReviewLoading,
     setDocumentIdForAiPanel: contextSetDocumentIdForAiPanel,
     setStepIdForAiPanel: contextSetStepIdForAiPanel,
-    contentToInsert, // New: Get content to insert from context
-    setContentToInsert, // New: Get setter for content to insert from context
+    contentToInsert,
+    setContentToInsert,
   } = outletContext ?? {};
 
   const setAiReviewFn = useCallback(
@@ -109,7 +107,6 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
 
   const [document, setDocument] = useState<Document | null>(null);
 
-  // Update AI Panel Context: Document ID
   useEffect(() => {
     if (currentDocumentId) {
       contextSetDocumentIdForAiPanel?.(currentDocumentId);
@@ -121,11 +118,9 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
     };
   }, [currentDocumentId, contextSetDocumentIdForAiPanel]);
 
-  // Update AI Panel Context: Step ID (once document is loaded)
   useEffect(() => {
     if (document?.step_id) {
       contextSetStepIdForAiPanel?.(document.step_id);
-      // Save last active step and document to local storage
       if (currentProjectId && document.step_id && currentDocumentId) {
         saveLastActiveStep(currentProjectId, document.step_id, currentDocumentId);
       }
@@ -222,21 +217,28 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
     fetchDocument();
   }, [fetchDocument]);
 
-  // New: Effect to handle content insertion from AI Chatbot
   useEffect(() => {
     const insertAiContent = async () => {
       if (contentToInsert && quillRef.current) {
         const quill = quillRef.current.getEditor();
-        const range = quill.getSelection(true);
+        const range = quill.getSelection(true); // true forces focus check or ignores it, but returns null if not selected
+
+        let index = 0;
+        if (range) {
+          index = range.index;
+        } else {
+          // If no selection, append to end of doc
+          index = quill.getLength();
+        }
 
         // Convert Markdown to HTML
         const htmlContent = await marked.parse(contentToInsert);
         const sanitizedHtml = DOMPurify.sanitize(htmlContent);
 
-        quill.clipboard.dangerouslyPasteHTML(range.index, sanitizedHtml);
-        quill.setSelection(range.index + sanitizedHtml.length, 0); // Move cursor after inserted content
-        setContent(quill.root.innerHTML); // Update local state with new content
-        setContentToInsert?.(null); // Clear the content after insertion
+        quill.clipboard.dangerouslyPasteHTML(index, sanitizedHtml);
+        quill.setSelection(index + sanitizedHtml.length, 0);
+        setContent(quill.root.innerHTML);
+        setContentToInsert?.(null);
       }
     };
 
@@ -458,8 +460,7 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
         if (pdf.numPages > maxPages) {
           fullText += `\n[...PDF truncated after ${maxPages} pages...]`;
         }
-        fileContent = fullText;
-        contentHtml = marked.parse(fullText); // Convert PDF text to HTML for editor
+        contentHtml = await marked.parse(fullText);
         rawTextContent = fullText;
       } else {
         showError('Unsupported file type. Please upload .docx, .html, .md, or .pdf files.');
@@ -471,8 +472,10 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
       if (quillRef.current) {
         const quill = quillRef.current.getEditor();
         const range = quill.getSelection(true);
-        quill.clipboard.dangerouslyPasteHTML(range.index, sanitizedHtml);
-        quill.setSelection(range.index + sanitizedHtml.length, 0);
+        const index = range ? range.index : quill.getLength();
+        
+        quill.clipboard.dangerouslyPasteHTML(index, sanitizedHtml);
+        quill.setSelection(index + sanitizedHtml.length, 0);
         setContent(quill.root.innerHTML);
         showSuccess('File content inserted successfully!');
 
@@ -553,7 +556,7 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
     }
 
     const fileName = `${document.document_name.replace(/\s/g, '_')}_v${document.current_version}`;
-    const currentContent = viewingVersionContent || content; // Use historical content if viewing, otherwise current
+    const currentContent = viewingVersionContent || content;
 
     if (!currentContent) {
       showError('No content available to download.');
@@ -594,7 +597,7 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
         }
 
         const canvas = await html2canvas(editorElement, {
-          scale: 2, // Increase scale for better resolution
+          scale: 2,
           useCORS: true,
           windowWidth: editorElement.scrollWidth,
           windowHeight: editorElement.scrollHeight,
@@ -734,7 +737,7 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
               onDelete={handleDeleteDocument}
               isDeleting={isDeleting}
               disableDelete={disableDelete}
-              onDownload={handleDownload} // Pass the new download handler
+              onDownload={handleDownload}
             />
           </div>
         </CardHeader>
