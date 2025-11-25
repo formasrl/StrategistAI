@@ -280,7 +280,7 @@ serve(async (req) => {
     const { data: stepData, error: stepError } = await supabaseClient
       .from("steps")
       .select(
-        "id, step_name, description, why_matters, timeline, phases(phase_name, phase_number, project_id)"
+        "id, step_name, description, why_matters, timeline, guiding_questions, expected_output, phases(phase_name, phase_number, project_id)"
       )
       .eq("id", effectiveStepId)
       .maybeSingle();
@@ -314,14 +314,21 @@ serve(async (req) => {
     const systemPrompt = [
       "You are StrategistAI, a senior brand strategist and coach.",
       "The user is working on brand strategy documents. You can help by analyzing uploads, answering questions, or writing content.",
-      "IMPORTANT: If the user asks you to 'write', 'create', 'draft', 'revise', or 'generate' content for the document:",
-      "1.  First, provide a brief explanation or summary of what you have created.",
-      "2.  Then, wrap the content you want to insert into their document in a special JSON block.",
-      "Format: ```json\n{\"insert_content\": \"YOUR MARKDOWN CONTENT HERE\"}\n```",
-      "Do not put the JSON block inside other code blocks. It should be a standalone block at the end of your response.",
+      "CONTEXT AWARENESS:",
+      "- You have access to the 'CURRENT STEP' details (goal, guiding questions, expected output).",
+      "- You have access to the 'PROJECT PROFILE' and 'RELEVANT SEMANTIC MEMORIES'.",
+      "MODES OF OPERATION:",
+      "1. ADVISORY/Q&A: If the user asks a question, asks for feedback, or asks for clarification, reply normally with text. Do not generate a document draft unless asked.",
+      "2. GENERATION/DRAFTING: If the user asks you to 'do the step', 'fill this out', 'write the document', 'draft', 'generate', or if their request implies creating the deliverable for this step:",
+      "   - Use the context provided (Project Profile, Step requirements, Files) to generate a high-quality, complete draft for the current document.",
+      "   - First, provide a short conversational confirmation (e.g., 'I've drafted the content for this step based on your project profile...').",
+      "   - Then, OUTPUT THE GENERATED DOCUMENT CONTENT inside a JSON block.",
+      "   Format: ```json\n{\"insert_content\": \"YOUR MARKDOWN CONTENT HERE\"}\n```",
+      "   - The Markdown in 'insert_content' should be the FULL document content, formatted nicely (headers, bullet points).",
+      "   - Do not put the JSON block inside other code blocks. It must be standalone at the end.",
       "If the user uploads files, prioritize using that content for your analysis or generation.",
       "Always respect previously published decisions and call out conflicts politely.",
-    ].join(" ");
+    ].join("\n");
 
     const modelTokenLimit = getModelTokenLimit(CHAT_MODEL);
 
@@ -402,7 +409,7 @@ serve(async (req) => {
         body: JSON.stringify({
           model: CHAT_MODEL,
           temperature: 0.5,
-          max_tokens: 800,
+          max_tokens: 1200, // Increased to allow for full document generation
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: finalPrompt },
@@ -460,11 +467,6 @@ serve(async (req) => {
     }
 
     // ---------- Streaming SSE mode ----------
-    // (Similar update for stream mode, constructing the prompt logic remains the same)
-    // For now, we assume the client uses stream=false for stability with tools, as configured in the client.
-    
-    // Fallback response if stream requested but code path above handled non-stream primarily
-    // But let's keep the stream block for completeness/future use, ensuring it uses the NEW finalPrompt
     const chatResponse = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -474,7 +476,7 @@ serve(async (req) => {
       body: JSON.stringify({
         model: CHAT_MODEL,
         temperature: 0.5,
-        max_tokens: 800,
+        max_tokens: 1200, // Increased
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: finalPrompt },
@@ -740,12 +742,18 @@ function formatSemanticSearchResults(matches: SemanticMatch[]): string {
 }
 
 function formatStepDefinition(step: StepRecord): string {
+  const guidingQuestions = step.guiding_questions && step.guiding_questions.length > 0
+    ? step.guiding_questions.map(q => `- ${q}`).join("\n")
+    : null;
+
   const lines = [
     `Name: ${sanitizeLine(step.step_name, "Untitled Step")}`,
     step.phases?.phase_name ? `Phase: ${step.phases.phase_name}` : undefined,
     step.description ? `Goal: ${step.description}` : undefined,
     step.why_matters ? `Why it matters: ${step.why_matters}` : undefined,
     step.timeline ? `Timeline: ${step.timeline}` : undefined,
+    guidingQuestions ? `Guiding Questions:\n${guidingQuestions}` : undefined,
+    step.expected_output ? `Expected Output: ${step.expected_output}` : undefined,
   ].filter(Boolean);
 
   return lines.join("\n");

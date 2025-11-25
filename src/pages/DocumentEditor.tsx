@@ -221,24 +221,28 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
     const insertAiContent = async () => {
       if (contentToInsert && quillRef.current) {
         const quill = quillRef.current.getEditor();
-        const range = quill.getSelection(true); // true forces focus check or ignores it, but returns null if not selected
-
-        let index = 0;
-        if (range) {
-          index = range.index;
-        } else {
-          // If no selection, append to end of doc
-          index = quill.getLength();
-        }
-
+        
         // Convert Markdown to HTML
         const htmlContent = await marked.parse(contentToInsert);
         const sanitizedHtml = DOMPurify.sanitize(htmlContent);
 
-        quill.clipboard.dangerouslyPasteHTML(index, sanitizedHtml);
-        quill.setSelection(index + sanitizedHtml.length, 0);
+        // Clear the editor first
+        quill.setText('');
+        
+        // Insert the new content
+        quill.clipboard.dangerouslyPasteHTML(0, sanitizedHtml);
+        
+        // Move cursor to end
+        const length = quill.getLength();
+        quill.setSelection(length, 0);
+        
+        // Update state explicitly
         setContent(quill.root.innerHTML);
+        
+        // Reset trigger
         setContentToInsert?.(null);
+        
+        showSuccess('Editor content replaced with AI generated text.');
       }
     };
 
