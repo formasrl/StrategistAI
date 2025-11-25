@@ -16,6 +16,9 @@ import { AiReview, Document } from '@/types/supabase';
 import './DocumentEditor.css';
 import { cn } from '@/lib/utils';
 
+import html2canvas from 'html2canvas'; // Import html2canvas
+import jsPDF from 'jspdf'; // Import jspdf
+
 type DashboardOutletContext = {
   setAiReview?: (review: AiReview | null) => void;
   setIsAiReviewLoading?: (isLoading: boolean) => void;
@@ -485,6 +488,94 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
     }
   };
 
+  const handleDownload = async (format: 'txt' | 'html' | 'pdf') => {
+    if (!document || !isPublished) {
+      showError('Document must be published to download.');
+      return;
+    }
+
+    const fileName = `${document.document_name.replace(/\s/g, '_')}_v${document.current_version}`;
+    const currentContent = viewingVersionContent || content; // Use historical content if viewing, otherwise current
+
+    if (!currentContent) {
+      showError('No content available to download.');
+      return;
+    }
+
+    try {
+      if (format === 'txt') {
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = currentContent;
+        const textContent = tempDiv.textContent || tempDiv.innerText || '';
+        const blob = new Blob([textContent], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${fileName}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showSuccess('Document downloaded as TXT.');
+      } else if (format === 'html') {
+        const blob = new Blob([currentContent], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${fileName}.html`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showSuccess('Document downloaded as HTML.');
+      } else if (format === 'pdf') {
+        showSuccess('Generating PDF, please wait...');
+        const editorElement = quillRef.current?.getEditor().root;
+        if (!editorElement) {
+          throw new Error('Quill editor element not found for PDF generation.');
+        }
+
+        const canvas = await html2canvas(editorElement, {
+          scale: 2, // Increase scale for better resolution
+          useCORS: true,
+          windowWidth: editorElement.scrollWidth,
+          windowHeight: editorElement.scrollHeight,
+        });
+
+        const imgData = canvas.toDataURL('image/png');
+        const pdf = new jsPDF({
+          orientation: 'p',
+          unit: 'pt',
+          format: 'a4',
+        });
+
+        const imgProps = pdf.getImageProperties(imgData);
+        const pdfWidth = pdf.internal.pageSize.getWidth();
+        const pdfHeight = pdf.internal.pageSize.getHeight();
+        const imgHeight = (imgProps.height * pdfWidth) / imgProps.width;
+
+        let heightLeft = imgHeight;
+        let position = 0;
+
+        pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, imgHeight);
+        heightLeft -= pdfHeight;
+
+        while (heightLeft >= 0) {
+          position = heightLeft - imgHeight;
+          pdf.addPage();
+          pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, imgHeight);
+          heightLeft -= pdfHeight;
+        }
+
+        pdf.save(`${fileName}.pdf`);
+        showSuccess('Document downloaded as PDF.');
+      }
+    } catch (error: any) {
+      console.error('Download error:', error);
+      showError(`Failed to download document: ${error.message}`);
+    }
+  };
+
   const modules = useMemo(
     () => ({
       toolbar: [
@@ -585,6 +676,7 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
               onDelete={handleDeleteDocument}
               isDeleting={isDeleting}
               disableDelete={disableDelete}
+              onDownload={handleDownload} // Pass the new download handler
             />
           </div>
         </CardHeader>

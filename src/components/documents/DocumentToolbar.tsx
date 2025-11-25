@@ -12,12 +12,19 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
   Loader2,
   RotateCcw,
   Save,
   UploadCloud,
   Link2Off,
   Trash2,
+  Download,
 } from 'lucide-react';
 
 interface DocumentToolbarProps {
@@ -35,6 +42,7 @@ interface DocumentToolbarProps {
   onDelete: () => void;
   isDeleting: boolean;
   disableDelete: boolean;
+  onDownload: (format: 'txt' | 'html' | 'pdf') => void; // New prop for download
 }
 
 const DocumentToolbar: React.FC<DocumentToolbarProps> = ({
@@ -52,6 +60,7 @@ const DocumentToolbar: React.FC<DocumentToolbarProps> = ({
   onDelete,
   isDeleting,
   disableDelete,
+  onDownload, // Destructure new prop
 }) => {
   const renderPrimaryAction = () => {
     if (isPublished) {
@@ -111,6 +120,27 @@ const DocumentToolbar: React.FC<DocumentToolbarProps> = ({
       >
         {renderPrimaryAction()}
       </Button>
+
+      {isPublished && ( // Only show download button if published
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" disabled={isSaving || isPublishing || isDisconnecting || isDeleting}>
+              <Download className="mr-2 h-4 w-4" /> Download
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => onDownload('txt')}>
+              Download as TXT
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onDownload('html')}>
+              Download as HTML
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onDownload('pdf')}>
+              Download as PDF
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
 
       <AlertDialog>
         <AlertDialogTrigger asChild>
