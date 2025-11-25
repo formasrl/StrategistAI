@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
-// We will replace the single-line Input with a textarea for multiline support
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   MessageCircle,
@@ -43,7 +42,6 @@ import {
   clearLastActiveChatSession,
 } from '@/utils/localStorage';
 
-// match package.json version
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   'https://unpkg.com/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs';
 
@@ -109,7 +107,6 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // auto scroll
   useEffect(() => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -141,7 +138,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
             displayContent = displayContent.replace(jsonBlockMatch[0], '').trim();
           }
         } catch {
-          // ignore parsing failure
+          // ignore
         }
       }
 
@@ -150,7 +147,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
       if (fileMatch) {
         fileNames = fileMatch[1].split(',').map((s: string) => s.trim());
       } else if (msg.content.match(/^\(File: .+\)/)) {
-        const legacyMatch = msg.content.match(/^\(File: (.+?))\)/);
+        const legacyMatch = msg.content.match(/^\(File: (.+?)\)/);
         if (legacyMatch) fileNames = [legacyMatch[1]];
       }
 
@@ -166,7 +163,6 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
     });
   }, []);
 
-  // fetch sessions + last-active session
   useEffect(() => {
     let isMounted = true;
 
@@ -258,7 +254,6 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
     [selectedChatSessionId, projectId, stepId, documentId, fetchMessagesForSession],
   );
 
-  // realtime new messages in active session
   useEffect(() => {
     if (!currentChatSessionId) return;
 
@@ -429,7 +424,6 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
 
   const handleDeleteSession = async (sessionId: string) => {
     try {
-      // delete messages first, then session
       const { error: msgErr } = await supabase
         .from('chat_messages')
         .delete()
@@ -613,10 +607,8 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
     showSuccess('Content sent to editor. Check the document editor panel!');
   };
 
-  // Shift+Enter => line break, Enter => send
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && e.shiftKey) {
-      // allow native newline
       return;
     }
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -839,7 +831,6 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
         </ScrollArea>
       </CardContent>
 
-      {/* File List Preview */}
       {uploadedFiles.length > 0 && (
         <div className="px-4 py-2 bg-background border-t border-border flex flex-wrap gap-2 max-h-24 overflow-y-auto">
           {uploadedFiles.map((file, index) => (
@@ -858,7 +849,6 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
         </div>
       )}
 
-      {/* Input – only show when there is an active chat or the user has started composing */}
       {hasActiveComposer && (
         <CardFooter className="p-4 pt-2 border-t border-border bg-background">
           <form onSubmit={handleSendMessage} className="flex w-full gap-2 items-end">
