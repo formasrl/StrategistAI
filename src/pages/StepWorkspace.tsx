@@ -19,13 +19,19 @@ interface StepWorkspaceOutletContext {
 }
 
 const StepWorkspace: React.FC = () => {
-  const { projectId, stepId } = useParams<{ projectId: string; stepId: string }>();
+  // Handle both route patterns: /step/:stepId and /document/:documentId
+  const { projectId, stepId: paramStepId, documentId: paramDocumentId } = useParams<{ projectId: string; stepId?: string; documentId?: string }>();
   const navigate = useNavigate();
+  
   const [step, setStep] = useState<Step | null>(null);
   const [isLoadingStep, setIsLoadingStep] = useState(true);
-  const [primaryDocumentId, setPrimaryDocumentId] = useState<string | undefined>(undefined);
-  const [isLoadingDocument, setIsLoadingDocument] = useState(true);
-  const [isGuidanceOpen, setIsGuidanceOpen] = useState(true); // Default to open
+  
+  // Resolved IDs (we need both a step ID and a document ID to render everything)
+  const [resolvedStepId, setResolvedStepId] = useState<string | undefined>(paramStepId);
+  const [activeDocumentId, setActiveDocumentId] = useState<string | undefined>(paramDocumentId);
+  
+  const [isLoadingResolution, setIsLoadingResolution] = useState(true);
+  const [isGuidanceOpen, setIsGuidanceOpen] = useState(true);
 
   const {
     setAiReview,
@@ -34,75 +40,99 @@ const StepWorkspace: React.FC = () => {
     setStepIdForAiPanel,
   } = useOutletContext<StepWorkspaceOutletContext>();
 
-  // Save last active step to local storage
+  // 1. Resolution Effect: Determine Step ID and Document ID based on URL params
   useEffect(() => {
-    if (projectId && stepId) {
-      saveLastActiveStep(projectId, stepId);
-    }
-  }, [projectId, stepId]);
+    const resolveContext = async () => {
+      setIsLoadingResolution(true);
 
-  useEffect(() => {
-    setStepIdForAiPanel(stepId);
-    return () => {
-      setStepIdForAiPanel(undefined);
+      // CASE A: Accessed via /document/:documentId
+      if (paramDocumentId && !paramStepId) {
+        // We know the document, but need to find the step
+        setActiveDocumentId(paramDocumentId);
+        
+        const { data: docData, error: docError } = await supabase
+          .from('documents')
+          .select('step_id')
+          .eq('id', paramDocumentId)
+          .single();
+
+        if (docError) {
+          showError(`Failed to resolve document context: ${docError.message}`);
+          setResolvedStepId(undefined);
+        } else if (docData.step_id) {
+          setResolvedStepId(docData.step_id);
+        }
+      } 
+      // CASE B: Accessed via /step/:stepId
+      else if (paramStepId) {
+        setResolvedStepId(paramStepId);
+        
+        // If document ID wasn't in URL, find the default/primary document for this step
+        if (!paramDocumentId) {
+          const { data: docs, error: docsError } = await supabase
+            .from('documents')
+            .select('id')
+            .eq('step_id', paramStepId)
+            .limit(1);
+            
+          if (docsError) {
+            console.error("Error fetching step documents:", docsError);
+          } else if (docs && docs.length > 0) {
+            setActiveDocumentId(docs[0].id);
+          } else {
+            // No document exists yet, will need to create one (handled later or by user action)
+            setActiveDocumentId(undefined);
+          }
+        } else {
+          setActiveDocumentId(paramDocumentId);
+        }
+      }
+      
+      setIsLoadingResolution(false);
     };
-  }, [stepId, setStepIdForAiPanel]);
 
-  useEffect(() => {
-    setDocumentIdForAiPanel(primaryDocumentId);
-    return () => {
-      setDocumentIdForAiPanel(undefined);
-    };
-  }, [primaryDocumentId, setDocumentIdForAiPanel]);
+    resolveContext();
+  }, [paramStepId, paramDocumentId]);
 
+  // 2. Fetch Step Data Effect (runs once we have a resolvedStepId)
   useEffect(() => {
-    const fetchStepAndDocument = async () => {
-      if (!stepId || !projectId) {
-        setIsLoadingStep(false);
-        setIsLoadingDocument(false);
+    const fetchStepDetails = async () => {
+      if (!resolvedStepId) {
+        if (!isLoadingResolution) setIsLoadingStep(false);
         return;
       }
 
       setIsLoadingStep(true);
-      setIsLoadingDocument(true);
-
-      const { data: stepData, error: stepError } = await supabase
+      const { data, error } = await supabase
         .from('steps')
         .select('*')
-        .eq('id', stepId)
+        .eq('id', resolvedStepId)
         .single();
 
-      if (stepError) {
-        showError(`Failed to load step details: ${stepError.message}`);
+      if (error) {
+        showError(`Failed to load step details: ${error.message}`);
         setStep(null);
-        setIsLoadingStep(false);
-        setIsLoadingDocument(false);
-        return;
-      }
-      setStep(stepData);
-      setIsLoadingStep(false);
-
-      const { data: existingDocuments, error: docError } = await supabase
-        .from('documents')
-        .select('id')
-        .eq('step_id', stepId)
-        .limit(1);
-
-      if (docError) {
-        showError(`Failed to check for existing documents: ${docError.message}`);
-        setIsLoadingDocument(false);
-        return;
-      }
-
-      if (existingDocuments && existingDocuments.length > 0) {
-        setPrimaryDocumentId(existingDocuments[0].id);
       } else {
-        const newDocumentName = `${stepData.step_name} Document`;
+        setStep(data);
+      }
+      setIsLoadingStep(false);
+    };
+
+    fetchStepDetails();
+  }, [resolvedStepId, isLoadingResolution]);
+
+  // 3. Handle Creation of Default Document if needed (Case B only)
+  useEffect(() => {
+    const createDefaultDocIfNeeded = async () => {
+      // Only create if we are fully loaded, have a step, but NO document yet
+      if (!isLoadingResolution && !isLoadingStep && step && !activeDocumentId && projectId && resolvedStepId) {
+        
+        const newDocumentName = `${step.step_name} Document`;
         const { data: newDocData, error: createDocError } = await supabase
           .from('documents')
           .insert({
             project_id: projectId,
-            step_id: stepId,
+            step_id: resolvedStepId,
             document_name: newDocumentName,
             content: '',
             status: 'draft',
@@ -113,19 +143,36 @@ const StepWorkspace: React.FC = () => {
           .single();
 
         if (createDocError) {
-          showError(`Failed to create initial document for step: ${createDocError.message}`);
-          setIsLoadingDocument(false);
-          return;
+          showError(`Failed to create initial document: ${createDocError.message}`);
+        } else {
+          setActiveDocumentId(newDocData.id);
         }
-        setPrimaryDocumentId(newDocData.id);
       }
-      setIsLoadingDocument(false);
     };
 
-    fetchStepAndDocument();
-  }, [projectId, stepId, setDocumentIdForAiPanel, setStepIdForAiPanel]);
+    createDefaultDocIfNeeded();
+  }, [isLoadingResolution, isLoadingStep, step, activeDocumentId, projectId, resolvedStepId]);
 
-  if (isLoadingStep || isLoadingDocument) {
+  // Sync with Sidebar/AI Panel Context
+  useEffect(() => {
+    if (resolvedStepId) setStepIdForAiPanel(resolvedStepId);
+    if (activeDocumentId) setDocumentIdForAiPanel(activeDocumentId);
+    
+    return () => {
+      setStepIdForAiPanel(undefined);
+      setDocumentIdForAiPanel(undefined);
+    };
+  }, [resolvedStepId, activeDocumentId, setStepIdForAiPanel, setDocumentIdForAiPanel]);
+
+  // Save to Local Storage
+  useEffect(() => {
+    if (projectId && resolvedStepId) {
+      saveLastActiveStep(projectId, resolvedStepId, activeDocumentId);
+    }
+  }, [projectId, resolvedStepId, activeDocumentId]);
+
+
+  if (isLoadingResolution || isLoadingStep) {
     return (
       <div className="flex flex-col h-full space-y-4">
         <Skeleton className="h-24 w-full" />
@@ -137,7 +184,7 @@ const StepWorkspace: React.FC = () => {
   if (!step) {
     return (
       <div className="text-center text-muted-foreground p-8">
-        <p>Step not found or an error occurred.</p>
+        <p>Step information could not be loaded.</p>
         <Button onClick={() => navigate(`/dashboard/${projectId}`)} className="mt-4">
           Back to Project
         </Button>
@@ -152,11 +199,11 @@ const StepWorkspace: React.FC = () => {
       {/* Guidance Section - Fixed at top (shrink-0) */}
       <div className="shrink-0">
         <Collapsible open={isGuidanceOpen} onOpenChange={setIsGuidanceOpen}>
-          <Card className="w-full">
+          <Card className="w-full border-l-4 border-l-blue-500 shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between p-4 pb-2 space-y-0">
               <div className="flex items-center space-x-2">
                 <Lightbulb className="h-5 w-5 text-blue-500" />
-                <CardTitle className="text-xl font-bold">Guidance: {step.step_name}</CardTitle>
+                <CardTitle className="text-lg font-bold">Guidance: {step.step_name}</CardTitle>
               </div>
               <CollapsibleTrigger asChild>
                 <Button variant="ghost" size="sm" className="w-9 p-0">
@@ -170,24 +217,21 @@ const StepWorkspace: React.FC = () => {
               </CollapsibleTrigger>
             </CardHeader>
             
-            {/* If collapsed, we show nothing extra. If open, we show content. */}
             <CollapsibleContent>
               <CardContent className="p-4 pt-0 text-sm text-muted-foreground space-y-4 animate-accordion-down">
-                {/* Description */}
-                <div>
-                  <h3 className="font-semibold text-foreground">What this step is about:</h3>
-                  <p>{step.description}</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <h3 className="font-semibold text-foreground mb-1">Goal:</h3>
+                    <p>{step.description}</p>
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-foreground mb-1">Why it matters:</h3>
+                    <p>{step.why_matters}</p>
+                  </div>
                 </div>
                 
-                {/* Why it Matters */}
                 <div>
-                  <h3 className="font-semibold text-foreground">Why it matters:</h3>
-                  <p>{step.why_matters}</p>
-                </div>
-                
-                {/* Guiding Questions */}
-                <div>
-                  <h3 className="font-semibold text-foreground">Guiding Questions:</h3>
+                  <h3 className="font-semibold text-foreground mb-1">Guiding Questions:</h3>
                   {guidingQuestions.length > 0 ? (
                     <ul className="list-disc pl-5 space-y-1">
                       {guidingQuestions.map((question, index) => (
@@ -206,17 +250,17 @@ const StepWorkspace: React.FC = () => {
 
       {/* Editor Section - Fills remaining space */}
       <div className="flex-1 min-h-0">
-        {primaryDocumentId ? (
+        {activeDocumentId ? (
           <DocumentEditor
             projectId={projectId}
-            documentId={primaryDocumentId}
+            documentId={activeDocumentId}
             setAiReview={setAiReview}
             setIsAiReviewLoading={setIsAiReviewLoading}
           />
         ) : (
-          <div className="text-center text-muted-foreground p-8 h-full flex items-center justify-center flex-col border rounded-md border-dashed">
+          <div className="text-center text-muted-foreground p-8 h-full flex items-center justify-center flex-col border rounded-md border-dashed bg-muted/10">
             <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
-            <p>Preparing document editor...</p>
+            <p>Initializing editor...</p>
           </div>
         )}
       </div>

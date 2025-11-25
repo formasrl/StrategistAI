@@ -49,7 +49,8 @@ const App = () => (
                   } />
                   <Route path=":projectId" element={<ProjectDetails />} />
                   <Route path=":projectId/step/:stepId" element={<StepWorkspace />} />
-                  <Route path=":projectId/document/:documentId" element={<DocumentEditor />} />
+                  {/* Point document route to StepWorkspace to show guidance header */}
+                  <Route path=":projectId/document/:documentId" element={<StepWorkspace />} />
                   <Route path="settings" element={<UserSettings />} />
                   <Route path="profile" element={<Profile />} />
                 </Route>
