@@ -103,6 +103,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
   );
   const [isLoadingSessions, setIsLoadingSessions] = useState(false);
   const [isHistoryCollapsed, setIsHistoryCollapsed] = useState(true);
+  const [isNewChatActiveForComposition, setIsNewChatActiveForComposition] = useState(false); // New state
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -180,6 +181,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
         setCurrentChatSessionId(undefined);
         setSelectedChatSessionId(undefined);
         setUploadedFiles([]);
+        setIsNewChatActiveForComposition(false); // Reset initially
       }
 
       try {
@@ -204,23 +206,24 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
         } else if (sessionsData && isMounted) {
           setAvailableChatSessions(sessionsData);
 
-          if (sessionsData.length > 0) {
-            let sessionToLoadId: string | undefined;
-            const lastActiveChat = getLastActiveChatSession(projectId, stepId, documentId);
+          let sessionToLoadId: string | undefined;
+          const lastActiveChat = getLastActiveChatSession(projectId, stepId, documentId);
 
-            if (lastActiveChat && sessionsData.some((s) => s.id === lastActiveChat)) {
-              sessionToLoadId = lastActiveChat;
-            } else {
-              sessionToLoadId = sessionsData[0].id;
-            }
+          if (lastActiveChat && sessionsData.some((s) => s.id === lastActiveChat)) {
+            sessionToLoadId = lastActiveChat;
+          } else if (sessionsData.length > 0) {
+            sessionToLoadId = sessionsData[0].id;
+          }
 
-            if (sessionToLoadId) {
-              setSelectedChatSessionId(sessionToLoadId);
-              setCurrentChatSessionId(sessionToLoadId);
-              saveLastActiveChatSession(projectId, stepId, documentId, sessionToLoadId);
-              const loadedMessages = await fetchMessagesForSession(sessionToLoadId);
-              if (isMounted) setMessages(loadedMessages);
-            }
+          if (sessionToLoadId) {
+            setSelectedChatSessionId(sessionToLoadId);
+            setCurrentChatSessionId(sessionToLoadId);
+            saveLastActiveChatSession(projectId, stepId, documentId, sessionToLoadId);
+            const loadedMessages = await fetchMessagesForSession(sessionToLoadId);
+            if (isMounted) setMessages(loadedMessages);
+          } else {
+            // No sessions found, automatically activate for composition
+            if (isMounted) setIsNewChatActiveForComposition(true);
           }
         }
       } catch (err) {
@@ -248,6 +251,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
       setSelectedChatSessionId(sessionId);
       setCurrentChatSessionId(sessionId);
       setUploadedFiles([]);
+      setIsNewChatActiveForComposition(false); // Not a new chat, so reset this
       if (projectId) {
         saveLastActiveChatSession(projectId, stepId, documentId, sessionId);
       }
@@ -386,6 +390,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
         setCurrentChatSessionId(data.chatSessionId);
         setSelectedChatSessionId(data.chatSessionId);
         saveLastActiveChatSession(projectId, stepId, documentId, data.chatSessionId);
+        setIsNewChatActiveForComposition(false); // Reset after session is established
 
         const { data: updatedSessions, error: updateError } = await supabase
           .from('chat_sessions')
@@ -418,7 +423,6 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
   };
 
   const handleNewChat = () => {
-    // Start a fresh conversation locally (server will create a session on first send)
     setMessages([]);
     setCurrentChatSessionId(undefined);
     setSelectedChatSessionId(undefined);
@@ -426,6 +430,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
     setUploadedFiles([]);
     setIsHistoryCollapsed(true);
     if (projectId) clearLastActiveChatSession(projectId, stepId, documentId);
+    setIsNewChatActiveForComposition(true); // Set to true to show input
     showSuccess('New chat session started.');
   };
 
@@ -448,6 +453,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
       if (sessionId === currentChatSessionId) {
         setCurrentChatSessionId(undefined);
         setMessages([]);
+        setIsNewChatActiveForComposition(true); // If active session deleted, prepare for new chat
       }
       if (sessionId === selectedChatSessionId) {
         setSelectedChatSessionId(undefined);
@@ -594,6 +600,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
     if (newUploadedFiles.length > 0) {
       setUploadedFiles((prev) => [...prev, ...newUploadedFiles]);
       showSuccess(`${newUploadedFiles.length} file(s) added.`);
+      setIsNewChatActiveForComposition(true); // If files are added, activate composer
     }
 
     if (fileInputRef.current) {
@@ -603,6 +610,10 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
 
   const handleRemoveFile = (index: number) => {
     setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
+    // If no files and no input message, and no active session, hide composer
+    if (uploadedFiles.length === 1 && inputMessage.trim().length === 0 && !currentChatSessionId) {
+      setIsNewChatActiveForComposition(false);
+    }
   };
 
   const handleUseThisContent = (content: string) => {
@@ -628,9 +639,10 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
   // Input should be visible if:
   // - we already have a chat session, OR
   // - the user has started typing, OR
-  // - there are files attached.
+  // - there are files attached, OR
+  // - a new chat has been explicitly started for composition.
   const hasActiveComposer =
-    !!currentChatSessionId || inputMessage.trim().length > 0 || uploadedFiles.length > 0;
+    !!currentChatSessionId || inputMessage.trim().length > 0 || uploadedFiles.length > 0 || isNewChatActiveForComposition;
 
   const hasAnySession = availableChatSessions.length > 0;
 
@@ -688,7 +700,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
                 <div className="text-center text-muted-foreground py-4">
                   Loading sessions...
                 </div>
-              ) : hasAnySession ? (
+              ) : availableChatSessions.length > 0 ? (
                 <div className="space-y-2">
                   {availableChatSessions.map((sessionItem) => (
                     <div
@@ -751,7 +763,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
             {/* Empty-state: no sessions and no messages -> show big Start New Chat button */}
             {!isLoadingHistory &&
               !hasAnySession &&
-              messages.length === 0 && (
+              messages.length === 0 && !isNewChatActiveForComposition && (
                 <div className="flex flex-col items-center justify-center h-[300px] text-center text-muted-foreground px-8">
                   <Bot className="h-12 w-12 mb-3 opacity-20" />
                   <p className="mb-3">
@@ -766,7 +778,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
 
             {/* Standard blank state when there is some context (e.g., step / doc) but no messages yet */}
             {!isLoadingHistory &&
-              (hasAnySession || messages.length > 0) &&
+              (hasAnySession || messages.length > 0 || isNewChatActiveForComposition) &&
               messages.length === 0 && (
                 <div className="flex flex-col items-center justify-center h-[300px] text-center text-muted-foreground px-8">
                   <Bot className="h-12 w-12 mb-3 opacity-20" />
@@ -891,7 +903,13 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
             <input
               type="file"
               ref={fileInputRef}
-              onChange={handleFileChange}
+              onChange={(e) => {
+                handleFileChange(e);
+                // Ensure composer is active if files are selected
+                if (e.target.files && e.target.files.length > 0) {
+                  setIsNewChatActiveForComposition(true);
+                }
+              }}
               style={{ display: 'none' }}
               multiple
               accept=".docx,.html,.md,.txt,.pdf"
@@ -926,7 +944,16 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
                     : 'Ask a question... (Enter = send, Shift+Enter = new line)'
                 }
                 value={inputMessage}
-                onChange={(e) => setInputMessage(e.target.value)}
+                onChange={(e) => {
+                  setInputMessage(e.target.value);
+                  // If user starts typing, ensure composer is active
+                  if (e.target.value.trim().length > 0) {
+                    setIsNewChatActiveForComposition(true);
+                  } else if (uploadedFiles.length === 0 && !currentChatSessionId) {
+                    // If no text, no files, and no active session, hide composer
+                    setIsNewChatActiveForComposition(false);
+                  }
+                }}
                 onKeyDown={handleKeyDown}
                 disabled={isSending}
                 className="w-full min-h-[40px] max-h-32 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
