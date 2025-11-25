@@ -303,14 +303,14 @@ serve(async (req) => {
 
     const systemPrompt = [
       "You are StrategistAI, a senior brand strategist and coach.",
-      "The user writes their own brand materials. Do NOT create full documents unless explicitly asked to 'write' or 'generate' a document.",
-      "Focus on guidance, critique, and strategic alignment.",
+      "The user is working on brand strategy documents. You can help by analyzing uploads, answering questions, or writing content.",
+      "IMPORTANT: If the user asks you to 'write', 'create', 'draft', 'revise', or 'generate' content for the document:",
+      "1.  First, provide a brief explanation or summary of what you have created.",
+      "2.  Then, wrap the content you want to insert into their document in a special JSON block.",
+      "Format: ```json\n{\"insert_content\": \"YOUR MARKDOWN CONTENT HERE\"}\n```",
+      "Do not put the JSON block inside other code blocks. It should be a standalone block at the end of your response.",
+      "If the user uploads a file, prioritize using that content for your analysis or generation.",
       "Always respect previously published decisions and call out conflicts politely.",
-      "If information is missing, ask clarifying questions instead of guessing.",
-      "Synthesize information from the 'RELEVANT SEMANTIC MEMORIES' section to provide comprehensive answers.",
-      "If the user uploads a file, prioritize using that content for analysis or generation.",
-      "When generating content for a document (e.g., a SWOT analysis, a brief), format your response in Markdown.",
-      "If you generate content that could be inserted into the editor, wrap it in a special JSON block like this: ```json\n{\"insert_content\": \"YOUR MARKDOWN CONTENT HERE\"}\n```. Otherwise, respond normally.",
     ].join(" ");
 
     const modelTokenLimit = getModelTokenLimit(CHAT_MODEL);
@@ -465,7 +465,7 @@ serve(async (req) => {
         body: JSON.stringify({
           model: CHAT_MODEL,
           temperature: 0.5,
-          max_tokens: 500,
+          max_tokens: 800, // Increased limit for generation
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: finalPrompt },
@@ -508,7 +508,8 @@ serve(async (req) => {
           if (typeof parsed.insert_content === 'string') {
             insertContent = parsed.insert_content;
             // Remove the JSON block from the displayable reply content
-            fullReplyContent = fullReplyContent.replace(jsonBlockMatch[0], '').trim();
+            // fullReplyContent = fullReplyContent.replace(jsonBlockMatch[0], '').trim();
+            // Actually, let's keep the original content as is in DB, but frontend will parse/hide it
           }
         } catch (e) {
           console.error("Failed to parse insert_content JSON block:", e);
@@ -534,7 +535,7 @@ serve(async (req) => {
       body: JSON.stringify({
         model: CHAT_MODEL,
         temperature: 0.5,
-        max_tokens: 500,
+        max_tokens: 800,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: finalPrompt },
@@ -609,8 +610,6 @@ serve(async (req) => {
               const parsed = JSON.parse(jsonBlockMatch[1]);
               if (typeof parsed.insert_content === 'string') {
                 insertContent = parsed.insert_content;
-                // Note: For streaming, we can't easily remove the JSON block from the streamed tokens
-                // The frontend will need to handle parsing the final message.
               }
             } catch (e) {
               console.error("Failed to parse insert_content JSON block in streamed response:", e);

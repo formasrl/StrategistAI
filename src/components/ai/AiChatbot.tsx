@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { MessageCircle, Send, Loader2, Bot, User, BookOpen, PlusCircle, RefreshCw, ChevronDown, ChevronUp, Paperclip } from 'lucide-react';
+import { MessageCircle, Send, Loader2, Bot, User, BookOpen, RefreshCw, ChevronDown, Paperclip } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { supabase } from '@/integrations/supabase/client';
 import { showError, showSuccess } from '@/utils/toast';
@@ -21,8 +21,11 @@ import {
 } from "@/components/ui/tooltip";
 
 import mammoth from 'mammoth'; // For .docx
-import { marked } from 'marked'; // For .md to HTML conversion
-import DOMPurify from 'dompurify'; // For sanitizing HTML
+// pdfjs-dist import
+import * as pdfjsLib from 'pdfjs-dist';
+
+// Set worker source - utilizing a CDN for simplicity in this environment to avoid build config issues
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.js`;
 
 interface ChatSource {
   document_name: string;
@@ -114,13 +117,32 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
             .order('created_at', { ascending: true });
 
           if (messagesData && isMounted) {
-            setMessages(messagesData.map(msg => ({
-              id: msg.id,
-              sender: msg.role === 'user' ? 'user' : 'ai',
-              text: msg.content || '',
-              timestamp: msg.created_at,
-              sources: [], // Historic messages might not store sources directly in this simple schema
-            })));
+            setMessages(messagesData.map(msg => {
+              // Attempt to parse insertContent from historic messages
+              let insertContent: string | undefined;
+              let displayContent = msg.content || '';
+              const jsonBlockMatch = displayContent.match(/```json\n?({[\s\S]*?})\n?```/);
+              if (jsonBlockMatch && jsonBlockMatch[1]) {
+                try {
+                  const parsed = JSON.parse(jsonBlockMatch[1]);
+                  if (typeof parsed.insert_content === 'string') {
+                    insertContent = parsed.insert_content;
+                    displayContent = displayContent.replace(jsonBlockMatch[0], '').trim();
+                  }
+                } catch (e) {
+                  // ignore parsing error
+                }
+              }
+
+              return {
+                id: msg.id,
+                sender: msg.role === 'user' ? 'user' : 'ai',
+                text: displayContent,
+                timestamp: msg.created_at,
+                sources: [], 
+                insertContent: insertContent,
+              };
+            }));
           }
         }
       } catch (err) {
@@ -330,8 +352,8 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
     const file = event.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 1024 * 1024 * 5) { // 5MB limit
-      showError('File size exceeds 5MB limit.');
+    if (file.size > 1024 * 1024 * 10) { // 10MB limit
+      showError('File size exceeds 10MB limit.');
       return;
     }
 
@@ -349,6 +371,9 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
           reader.onload = (e) => resolve(e.target?.result as string);
           reader.readAsText(file);
         });
+        // Strip tags for chat context, or keep structural tags? 
+        // For the chat model to understand, raw text is usually best, but simple HTML is okay.
+        // Let's strip tags to keep token count low and relevance high.
         fileContent = new DOMParser().parseFromString(fileContent, 'text/html').body.textContent || '';
       } else if (fileExtension === 'md') {
         fileContent = await new Promise<string>((resolve) => {
@@ -356,8 +381,32 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
           reader.onload = (e) => resolve(e.target?.result as string);
           reader.readAsText(file);
         });
+      } else if (fileExtension === 'pdf') {
+        // PDF Handling
+        const arrayBuffer = await file.arrayBuffer();
+        const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+        const pdf = await loadingTask.promise;
+        
+        let fullText = '';
+        // Limit pages to avoid massive token loads
+        const maxPages = Math.min(pdf.numPages, 15); 
+        
+        for (let i = 1; i <= maxPages; i++) {
+          const page = await pdf.getPage(i);
+          const textContent = await page.getTextContent();
+          const pageText = textContent.items
+            .map((item: any) => item.str)
+            .join(' ');
+          fullText += pageText + '\n\n';
+        }
+        
+        if (pdf.numPages > maxPages) {
+          fullText += `\n[...PDF truncated after ${maxPages} pages...]`;
+        }
+        
+        fileContent = fullText;
       } else {
-        showError('Unsupported file type. Please upload .docx, .html, or .md files.');
+        showError('Unsupported file type. Please upload .docx, .pdf, .html, or .md files.');
         return;
       }
 
@@ -411,6 +460,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
               <div className="flex flex-col items-center justify-center h-[300px] text-center text-muted-foreground px-8">
                 <Bot className="h-12 w-12 mb-3 opacity-20" />
                 <p>Ask StrategistAI about your project.</p>
+                <p className="text-sm mt-2">Upload a PDF, DOCX, or MD file to get analysis.</p>
               </div>
             )}
 
@@ -444,6 +494,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
                       className="mt-2 w-full"
                       onClick={() => handleUseThisContent(msg.insertContent!)}
                     >
+                      <PlusCircle className="mr-2 h-4 w-4" />
                       Use this in editor
                     </Button>
                   )}
@@ -484,7 +535,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
             ref={fileInputRef}
             onChange={handleFileChange}
             style={{ display: 'none' }}
-            accept=".docx,.html,.md"
+            accept=".docx,.html,.md,.pdf"
           />
           <TooltipProvider>
             <Tooltip>
@@ -501,7 +552,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
                   <span className="sr-only">Attach File</span>
                 </Button>
               </TooltipTrigger>
-              <TooltipContent side="top">Attach Document (.docx, .html, .md)</TooltipContent>
+              <TooltipContent side="top">Attach Document (.docx, .pdf, .html, .md)</TooltipContent>
             </Tooltip>
           </TooltipProvider>
           <Input
