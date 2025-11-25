@@ -25,6 +25,7 @@ import { Badge } from "@/components/ui/badge";
 import mammoth from 'mammoth'; // For .docx
 // pdfjs-dist import
 import * as pdfjsLib from 'pdfjs-dist';
+import { saveLastActiveChatSession, getLastActiveChatSession, clearLastActiveChatSession } from '@/utils/localStorage'; // New imports
 
 // Set worker source explicitly to 4.4.168 CDN version to match package.json
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs`;
@@ -178,11 +179,21 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
           console.error('Error fetching chat sessions:', sessionsError);
         } else if (sessionsData && isMounted) {
           setAvailableChatSessions(sessionsData);
-          const latestSession = sessionsData[0];
-          if (latestSession) {
-            setSelectedChatSessionId(latestSession.id);
-            setCurrentChatSessionId(latestSession.id);
-            const loadedMessages = await fetchMessagesForSession(latestSession.id);
+          
+          let sessionToLoadId: string | undefined;
+          const lastActiveChat = getLastActiveChatSession(projectId, stepId, documentId);
+
+          if (lastActiveChat && sessionsData.some(s => s.id === lastActiveChat)) {
+            sessionToLoadId = lastActiveChat;
+          } else if (sessionsData.length > 0) {
+            sessionToLoadId = sessionsData[0].id; // Fallback to latest if no persisted or persisted is invalid
+          }
+
+          if (sessionToLoadId) {
+            setSelectedChatSessionId(sessionToLoadId);
+            setCurrentChatSessionId(sessionToLoadId);
+            saveLastActiveChatSession(projectId, stepId, documentId, sessionToLoadId); // Persist the loaded session
+            const loadedMessages = await fetchMessagesForSession(sessionToLoadId);
             if (isMounted) setMessages(loadedMessages);
           }
         }
@@ -209,11 +220,12 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
     setSelectedChatSessionId(sessionId);
     setCurrentChatSessionId(sessionId);
     setUploadedFiles([]); // Clear files when switching sessions
+    saveLastActiveChatSession(projectId!, stepId, documentId, sessionId); // Persist the selected session
     const loadedMessages = await fetchMessagesForSession(sessionId);
     setMessages(loadedMessages);
     setIsLoadingHistory(false);
     setIsHistoryCollapsed(true); // Collapse history after selection
-  }, [selectedChatSessionId, fetchMessagesForSession]);
+  }, [selectedChatSessionId, projectId, stepId, documentId, fetchMessagesForSession]);
 
   // 3. Realtime Subscription
   useEffect(() => {
@@ -338,6 +350,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
       if (data.chatSessionId && !currentChatSessionId) {
         setCurrentChatSessionId(data.chatSessionId);
         setSelectedChatSessionId(data.chatSessionId); // Select the new session
+        saveLastActiveChatSession(projectId, stepId, documentId, data.chatSessionId); // Persist the new session
         // Re-fetch sessions to include the new one in the list
         const { data: updatedSessions, error: updateError } = await supabase
           .from('chat_sessions')
@@ -373,6 +386,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({ projectId, phaseId, stepId, docum
     setInputMessage('');
     setUploadedFiles([]);
     setIsHistoryCollapsed(true); // Collapse history when starting new chat
+    clearLastActiveChatSession(projectId!, stepId, documentId); // Clear persisted session
     showSuccess('New chat session started.');
   };
 
