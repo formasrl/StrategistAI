@@ -6,9 +6,10 @@ import { showError } from '@/utils/toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
-import { Lightbulb, Loader2 } from 'lucide-react';
+import { Lightbulb, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
 import DocumentEditor from './DocumentEditor';
-import { saveLastActiveStep } from '@/utils/localStorage'; // Import localStorage utility
+import { saveLastActiveStep } from '@/utils/localStorage';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 
 interface StepWorkspaceOutletContext {
   setAiReview: (review: AiReview | null) => void;
@@ -24,6 +25,7 @@ const StepWorkspace: React.FC = () => {
   const [isLoadingStep, setIsLoadingStep] = useState(true);
   const [primaryDocumentId, setPrimaryDocumentId] = useState<string | undefined>(undefined);
   const [isLoadingDocument, setIsLoadingDocument] = useState(true);
+  const [isGuidanceOpen, setIsGuidanceOpen] = useState(true); // Default to open
 
   const {
     setAiReview,
@@ -146,57 +148,78 @@ const StepWorkspace: React.FC = () => {
   const guidingQuestions = (step.guiding_questions as string[]) || [];
 
   return (
-    <div className="flex flex-col h-full space-y-4">
-      <Card className="w-full">
-        <CardHeader className="flex flex-row items-center space-x-2 p-4 pb-2">
-          <Lightbulb className="h-5 w-5 text-blue-500" />
-          <CardTitle className="text-xl font-bold">Guidance: {step.step_name}</CardTitle>
-        </CardHeader>
-        <CardContent className="p-4 pt-0 text-sm text-muted-foreground space-y-4">
-          
-          {/* Description */}
-          <div>
-            <h3 className="font-semibold text-foreground">What this step is about:</h3>
-            <p>{step.description}</p>
-          </div>
-          
-          {/* Why it Matters */}
-          <div>
-            <h3 className="font-semibold text-foreground">Why it matters:</h3>
-            <p>{step.why_matters}</p>
-          </div>
-          
-          {/* Guiding Questions */}
-          <div>
-            <h3 className="font-semibold text-foreground">Guiding Questions:</h3>
-            {guidingQuestions.length > 0 ? (
-              <ul className="list-disc pl-5 space-y-1">
-                {guidingQuestions.map((question, index) => (
-                  <li key={index}>{question}</li>
-                ))}
-              </ul>
-            ) : (
-              <p className="italic">No specific questions for this step.</p>
-            )}
-          </div>
+    <div className="flex flex-col h-full space-y-4 overflow-hidden">
+      {/* Guidance Section - Fixed at top (shrink-0) */}
+      <div className="shrink-0">
+        <Collapsible open={isGuidanceOpen} onOpenChange={setIsGuidanceOpen}>
+          <Card className="w-full">
+            <CardHeader className="flex flex-row items-center justify-between p-4 pb-2 space-y-0">
+              <div className="flex items-center space-x-2">
+                <Lightbulb className="h-5 w-5 text-blue-500" />
+                <CardTitle className="text-xl font-bold">Guidance: {step.step_name}</CardTitle>
+              </div>
+              <CollapsibleTrigger asChild>
+                <Button variant="ghost" size="sm" className="w-9 p-0">
+                  {isGuidanceOpen ? (
+                    <ChevronUp className="h-4 w-4" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4" />
+                  )}
+                  <span className="sr-only">Toggle Guidance</span>
+                </Button>
+              </CollapsibleTrigger>
+            </CardHeader>
+            
+            {/* If collapsed, we show nothing extra. If open, we show content. */}
+            <CollapsibleContent>
+              <CardContent className="p-4 pt-0 text-sm text-muted-foreground space-y-4 animate-accordion-down">
+                {/* Description */}
+                <div>
+                  <h3 className="font-semibold text-foreground">What this step is about:</h3>
+                  <p>{step.description}</p>
+                </div>
+                
+                {/* Why it Matters */}
+                <div>
+                  <h3 className="font-semibold text-foreground">Why it matters:</h3>
+                  <p>{step.why_matters}</p>
+                </div>
+                
+                {/* Guiding Questions */}
+                <div>
+                  <h3 className="font-semibold text-foreground">Guiding Questions:</h3>
+                  {guidingQuestions.length > 0 ? (
+                    <ul className="list-disc pl-5 space-y-1">
+                      {guidingQuestions.map((question, index) => (
+                        <li key={index}>{question}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="italic">No specific questions for this step.</p>
+                  )}
+                </div>
+              </CardContent>
+            </CollapsibleContent>
+          </Card>
+        </Collapsible>
+      </div>
 
-          {/* Removed Expected Output */}
-        </CardContent>
-      </Card>
-
-      {primaryDocumentId ? (
-        <DocumentEditor
-          projectId={projectId}
-          documentId={primaryDocumentId}
-          setAiReview={setAiReview}
-          setIsAiReviewLoading={setIsAiReviewLoading}
-        />
-      ) : (
-        <div className="text-center text-muted-foreground p-8">
-          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
-          <p>Preparing document editor...</p>
-        </div>
-      )}
+      {/* Editor Section - Fills remaining space */}
+      <div className="flex-1 min-h-0">
+        {primaryDocumentId ? (
+          <DocumentEditor
+            projectId={projectId}
+            documentId={primaryDocumentId}
+            setAiReview={setAiReview}
+            setIsAiReviewLoading={setIsAiReviewLoading}
+          />
+        ) : (
+          <div className="text-center text-muted-foreground p-8 h-full flex items-center justify-center flex-col border rounded-md border-dashed">
+            <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+            <p>Preparing document editor...</p>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
