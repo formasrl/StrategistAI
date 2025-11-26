@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Step, AiReview } from '@/types/supabase';
@@ -33,6 +33,10 @@ const StepWorkspace: React.FC = () => {
   
   const [isLoadingResolution, setIsLoadingResolution] = useState(true);
   const [isGuidanceOpen, setIsGuidanceOpen] = useState(true);
+
+  // New states for phase steps navigation
+  const [phaseSteps, setPhaseSteps] = useState<Step[]>([]);
+  const [isLoadingPhaseSteps, setIsLoadingPhaseSteps] = useState(false);
 
   const {
     setAiReview,
@@ -99,7 +103,7 @@ const StepWorkspace: React.FC = () => {
       setIsLoadingStep(true);
       const { data, error } = await supabase
         .from('steps')
-        .select('*')
+        .select('*, phases(id, phase_name, phase_number)') // Select phase details too
         .eq('id', resolvedStepId)
         .single();
 
@@ -114,6 +118,33 @@ const StepWorkspace: React.FC = () => {
 
     fetchStepDetails();
   }, [resolvedStepId, isLoadingResolution]);
+
+  // NEW EFFECT: Fetch all steps for the current phase
+  useEffect(() => {
+    const fetchPhaseSteps = async () => {
+      if (!step?.phase_id) {
+        setPhaseSteps([]);
+        return;
+      }
+
+      setIsLoadingPhaseSteps(true);
+      const { data, error } = await supabase
+        .from('steps')
+        .select('id, step_name, order_index')
+        .eq('phase_id', step.phase_id)
+        .order('order_index', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching phase steps:', error);
+        setPhaseSteps([]);
+      } else {
+        setPhaseSteps(data || []);
+      }
+      setIsLoadingPhaseSteps(false);
+    };
+
+    fetchPhaseSteps();
+  }, [step?.phase_id]); // Re-run when the current step's phase_id changes
 
   // 3. Handle Creation of Default Document if needed
   useEffect(() => {
@@ -163,8 +194,26 @@ const StepWorkspace: React.FC = () => {
     }
   }, [projectId, resolvedStepId, activeDocumentId]);
 
+  // Calculate next/previous step IDs
+  const { prevStep, nextStep } = useMemo(() => {
+    if (!resolvedStepId || !phaseSteps.length) {
+      return { prevStep: null, nextStep: null };
+    }
 
-  if (isLoadingResolution || isLoadingStep) {
+    const currentIndex = phaseSteps.findIndex((s) => s.id === resolvedStepId);
+    const prevStep = currentIndex > 0 ? phaseSteps[currentIndex - 1] : null;
+    const nextStep = currentIndex < phaseSteps.length - 1 ? phaseSteps[currentIndex + 1] : null;
+
+    return { prevStep, nextStep };
+  }, [resolvedStepId, phaseSteps]);
+
+  const handleNavigateToStep = (targetStepId: string) => {
+    if (projectId) {
+      navigate(`/dashboard/${projectId}/step/${targetStepId}`);
+    }
+  };
+
+  if (isLoadingResolution || isLoadingStep || isLoadingPhaseSteps) { // Include new loading state
     return (
       <div className="flex flex-col h-full space-y-4">
         <Skeleton className="h-24 w-full" />
@@ -230,6 +279,24 @@ const StepWorkspace: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
+      {/* Navigation Buttons */}
+      <div className="flex justify-between items-center mb-4 shrink-0">
+        <Button
+          variant="outline"
+          onClick={() => prevStep && handleNavigateToStep(prevStep.id)}
+          disabled={!prevStep}
+        >
+          Previous Step
+        </Button>
+        <Button
+          variant="outline"
+          onClick={() => nextStep && handleNavigateToStep(nextStep.id)}
+          disabled={!nextStep}
+        >
+          Next Step
+        </Button>
+      </div>
+
       {/* Guidance Section - Fixed at top */}
       <div className="shrink-0 pb-4 z-10 bg-background">
         <Collapsible open={isGuidanceOpen} onOpenChange={setIsGuidanceOpen}>
