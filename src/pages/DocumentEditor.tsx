@@ -23,6 +23,16 @@ import DOMPurify from 'dompurify';
 import mammoth from 'mammoth';
 import * as pdfjsLib from 'pdfjs-dist';
 import { saveLastActiveStep } from '@/utils/localStorage';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs`;
 
@@ -33,6 +43,7 @@ type DashboardOutletContext = {
   setStepIdForAiPanel?: (stepId: string | undefined) => void;
   setContentToInsert?: (content: string | null) => void;
   contentToInsert?: string | null;
+  handleAttemptInsertContent?: (content: string) => void; // New prop for AI Chatbot
 };
 
 interface DocumentEditorProps {
@@ -143,6 +154,10 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
   const [suggestedSteps, setSuggestedSteps] = useState<SuggestedStep[]>([]);
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
 
+  // New state for handling AI content insertion into published document
+  const [isConfirmingInsertDisconnect, setIsConfirmingInsertDisconnect] = useState(false);
+  const [contentToInsertAfterDisconnect, setContentToInsertAfterDisconnect] = useState<string | null>(null);
+
   const isPublished = status === ('published' as Document['status']);
   const isHistoricalView = viewingVersionContent !== null;
 
@@ -217,37 +232,42 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
     fetchDocument();
   }, [fetchDocument]);
 
+  const insertContentIntoEditor = useCallback(async (newContent: string) => {
+    if (!quillRef.current) return;
+
+    const quill = quillRef.current.getEditor();
+    
+    // Convert Markdown to HTML
+    const htmlContent = await marked.parse(newContent);
+    const sanitizedHtml = DOMPurify.sanitize(htmlContent);
+
+    // Clear the editor first
+    quill.setText('');
+    
+    // Insert the new content
+    quill.clipboard.dangerouslyPasteHTML(0, sanitizedHtml);
+    
+    // Move cursor to end
+    const length = quill.getLength();
+    quill.setSelection(length, 0);
+    
+    // Update state explicitly
+    setContent(quill.root.innerHTML);
+    
+    // Clear any pending content and close dialog
+    setContentToInsertAfterDisconnect(null);
+    setIsConfirmingInsertDisconnect(false);
+
+    showSuccess('Editor content replaced with AI generated text.');
+  }, []);
+
+  // Effect to handle content from AI Panel
   useEffect(() => {
-    const insertAiContent = async () => {
-      if (contentToInsert && quillRef.current) {
-        const quill = quillRef.current.getEditor();
-        
-        // Convert Markdown to HTML
-        const htmlContent = await marked.parse(contentToInsert);
-        const sanitizedHtml = DOMPurify.sanitize(htmlContent);
-
-        // Clear the editor first
-        quill.setText('');
-        
-        // Insert the new content
-        quill.clipboard.dangerouslyPasteHTML(0, sanitizedHtml);
-        
-        // Move cursor to end
-        const length = quill.getLength();
-        quill.setSelection(length, 0);
-        
-        // Update state explicitly
-        setContent(quill.root.innerHTML);
-        
-        // Reset trigger
-        setContentToInsert?.(null);
-        
-        showSuccess('Editor content replaced with AI generated text.');
-      }
-    };
-
-    insertAiContent();
-  }, [contentToInsert, setContentToInsert]);
+    if (contentToInsert && document) {
+      handleAttemptInsertContent(contentToInsert);
+      setContentToInsert?.(null); // Clear the content from context after handling
+    }
+  }, [contentToInsert, document, setContentToInsert]);
 
 
   const handleSave = async () => {
@@ -641,6 +661,32 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
     }
   };
 
+  // New function to handle content insertion from AI Chatbot
+  const handleAttemptInsertContent = useCallback(async (newContent: string) => {
+    if (!document) {
+      showError('No document is active to insert content into.');
+      return;
+    }
+
+    if (document.status === 'published') {
+      setContentToInsertAfterDisconnect(newContent);
+      setIsConfirmingInsertDisconnect(true);
+    } else {
+      await insertContentIntoEditor(newContent);
+    }
+  }, [document, insertContentIntoEditor]);
+
+  // Expose handleAttemptInsertContent via context
+  useEffect(() => {
+    if (outletContext && outletContext.handleAttemptInsertContent !== handleAttemptInsertContent) {
+      // This is a bit of a hack to update the context function if it changes,
+      // but it's necessary for the AI Chatbot to call the latest version.
+      // In a real app, you might use a more robust context management solution.
+      (outletContext as DashboardOutletContext).handleAttemptInsertContent = handleAttemptInsertContent;
+    }
+  }, [outletContext, handleAttemptInsertContent]);
+
+
   const modules = useMemo(
     () => ({
       toolbar: [
@@ -796,6 +842,48 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
           isLoading={isLoadingSuggestions}
         />
       )}
+
+      {/* AlertDialog for disconnecting from RAG */}
+      <AlertDialog open={isConfirmingInsertDisconnect} onOpenChange={setIsConfirmingInsertDisconnect}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Disconnect from RAG?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This document is currently published to RAG (Read-A-Document). To insert new content,
+              it must first be disconnected, making it editable again. This will remove its current
+              summary and key decisions from AI memory.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDisconnecting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={async () => {
+                if (!document || !contentToInsertAfterDisconnect) return;
+                setIsDisconnecting(true);
+                const disconnectResult = await syncDocumentMemory('disconnect');
+                setIsDisconnecting(false);
+
+                if (disconnectResult.ok) {
+                  showSuccess('Document disconnected from RAG.');
+                  setStatus('draft' as Document['status']);
+                  setDocument((prev) => (prev ? { ...prev, status: 'draft' } : null));
+                  await insertContentIntoEditor(contentToInsertAfterDisconnect);
+                } else {
+                  showError(`Failed to disconnect from RAG: ${disconnectResult.message}`);
+                  setContentToInsertAfterDisconnect(null); // Clear content if disconnect fails
+                }
+              }}
+              disabled={isDisconnecting}
+            >
+              {isDisconnecting ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                'Yes, Disconnect & Insert'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

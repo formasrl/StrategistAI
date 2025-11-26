@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Step, AiReview } from '@/types/supabase';
@@ -17,6 +17,7 @@ interface StepWorkspaceOutletContext {
   setIsAiReviewLoading: (isLoading: boolean) => void;
   setDocumentIdForAiPanel: (docId: string | undefined) => void;
   setStepIdForAiPanel: (stepId: string | undefined) => void;
+  handleAttemptInsertContent: (content: string) => void; // New context prop
 }
 
 const StepWorkspace: React.FC = () => {
@@ -43,6 +44,7 @@ const StepWorkspace: React.FC = () => {
     setIsAiReviewLoading,
     setDocumentIdForAiPanel,
     setStepIdForAiPanel,
+    handleAttemptInsertContent, // Destructure new context prop
   } = useOutletContext<StepWorkspaceOutletContext>();
 
   // 1. Resolution Effect

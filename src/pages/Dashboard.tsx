@@ -19,8 +19,9 @@ type DashboardOutletContext = {
   setDocumentIdForAiPanel?: (docId: string | undefined) => void;
   setStepIdForAiPanel?: (stepId: string | undefined) => void;
   refreshProjects?: () => void;
-  setContentToInsert?: (content: string) => void;
-  contentToInsert?: string | null; // Added this
+  setContentToInsert?: (content: string | null) => void;
+  contentToInsert?: string | null;
+  handleAttemptInsertContent?: (content: string) => void; // New context prop
 };
 
 const Dashboard = () => {
@@ -46,6 +47,8 @@ const Dashboard = () => {
 
   const [projectsRefreshTrigger, setProjectsRefreshTrigger] = useState(0);
   const [contentToInsert, setContentToInsert] = useState<string | null>(null);
+  const [handleAttemptInsertContent, setHandleAttemptInsertContent] = useState<((content: string) => void) | undefined>(undefined);
+
 
   const refreshProjects = useCallback(() => {
     setProjectsRefreshTrigger((prev) => prev + 1);
@@ -204,7 +207,23 @@ const Dashboard = () => {
     setStepIdForAiPanel: setAiPanelStepId,
     refreshProjects,
     setContentToInsert,
-    contentToInsert, // This was missing!
+    contentToInsert,
+    handleAttemptInsertContent: (content: string) => {
+      // This function will be called by AiChatbot
+      // It needs to be passed down to DocumentEditor to execute the logic
+      // For now, we'll just set it here, and DocumentEditor will pick it up
+      // and execute its own handleAttemptInsertContent.
+      // This is a temporary bridge. The actual logic is in DocumentEditor.
+      setHandleAttemptInsertContent(() => (c: string) => {
+        // This inner function will be called by DocumentEditor's useEffect
+        // to trigger its own handleAttemptInsertContent.
+        // This is a workaround for passing functions through Outlet context.
+        // A more robust solution might involve a global state manager or direct prop drilling
+        // if the component hierarchy was simpler.
+        console.log("Dashboard received content to insert:", c);
+        setContentToInsert(c);
+      });
+    },
   };
 
   const shouldRunTour = !onboardingTourCompleted && location.pathname.startsWith('/dashboard');
@@ -251,6 +270,7 @@ const Dashboard = () => {
             documentId={aiPanelDocumentId}
             contentToInsert={contentToInsert}
             setContentToInsert={setContentToInsert}
+            handleAttemptInsertContent={handleAttemptInsertContent} // Pass the new prop
           />
         }
       />

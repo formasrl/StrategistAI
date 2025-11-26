@@ -76,8 +76,11 @@ interface AiChatbotProps {
   phaseId?: string;
   stepId?: string;
   documentId?: string;
-  contentToInsert: string | null;
-  setContentToInsert: (content: string | null) => void;
+  // contentToInsert is no longer directly used here, but kept for type compatibility if needed elsewhere
+  contentToInsert: string | null; 
+  // setContentToInsert is no longer directly used here, but kept for type compatibility if needed elsewhere
+  setContentToInsert: (content: string | null) => void; 
+  handleAttemptInsertContent?: (content: string) => void; // New prop
 }
 
 interface UploadedFile {
@@ -94,7 +97,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
   phaseId,
   stepId,
   documentId,
-  setContentToInsert,
+  handleAttemptInsertContent, // Destructure new prop
 }) => {
   const { session } = useSession();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -359,7 +362,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
                 const parsed = JSON.parse(jsonBlockMatch[1]);
                 if (typeof parsed.insert_content === 'string') {
                   insertContent = parsed.insert_content;
-                  displayContent = displayContent.replace(jsonBlockMatch[0], '').trim();
+                  displayContent = newMsg.content.replace(jsonBlockMatch[0], '').trim();
                 }
               } catch {
                 // ignore
@@ -689,8 +692,11 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
       showError('Please navigate to a document to insert content.');
       return;
     }
-    setContentToInsert(content);
-    showSuccess('Content sent to editor. Check the document editor panel!');
+    if (handleAttemptInsertContent) {
+      handleAttemptInsertContent(content);
+    } else {
+      showError('Editor is not ready to receive content. Please try again.');
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -774,7 +780,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
     );
   };
 
-  if (isLoadingHistory || isLoadingReviews) { // Removed isLoadingResolution
+  if (isLoadingHistory || isLoadingReviews) {
     return (
       <Card className="flex flex-col h-full border-none shadow-none bg-transparent">
         <CardContent className="flex-1 flex flex-col justify-center items-center text-muted-foreground">
