@@ -183,11 +183,31 @@ const StepWorkspace: React.FC = () => {
     );
   }
 
-  const guidingQuestions = (step.guiding_questions as string[]) || [];
+  // Robust parsing for guiding questions
+  const getGuidingQuestions = (data: any): string[] => {
+    if (!data) return [];
+    if (Array.isArray(data)) return data.map(String);
+    if (typeof data === 'string') {
+      try {
+        // Handle potential double-encoded JSON string
+        const parsed = JSON.parse(data);
+        if (Array.isArray(parsed)) return parsed.map(String);
+        // If it parses to a string (e.g. '"question"'), recurse once or return array
+        if (typeof parsed === 'string') return [parsed];
+        return [];
+      } catch {
+        // If not JSON, treat the string itself as a single question if not empty
+        return data.trim().length > 0 ? [data] : [];
+      }
+    }
+    return [];
+  };
+
+  const guidingQuestions = getGuidingQuestions(step.guiding_questions);
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Guidance Section - Fixed at top (shrink-0) */}
+      {/* Guidance Section - Fixed at top */}
       <div className="shrink-0 pb-4 z-10 bg-background">
         <Collapsible open={isGuidanceOpen} onOpenChange={setIsGuidanceOpen}>
           <Card className="w-full border-l-4 border-l-blue-500 shadow-sm">
@@ -213,11 +233,11 @@ const StepWorkspace: React.FC = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <h3 className="font-semibold text-foreground mb-1">Goal:</h3>
-                    <p>{step.description}</p>
+                    <p>{step.description || "No goal defined."}</p>
                   </div>
                   <div>
                     <h3 className="font-semibold text-foreground mb-1">Why it matters:</h3>
-                    <p>{step.why_matters}</p>
+                    <p>{step.why_matters || "No context provided."}</p>
                   </div>
                 </div>
                 
@@ -230,7 +250,7 @@ const StepWorkspace: React.FC = () => {
                       ))}
                     </ul>
                   ) : (
-                    <p className="italic">No specific questions for this step.</p>
+                    <p className="italic text-muted-foreground">No specific questions for this step.</p>
                   )}
                 </div>
               </CardContent>
@@ -240,7 +260,7 @@ const StepWorkspace: React.FC = () => {
       </div>
 
       {/* Editor Section - Scrollable Area */}
-      <div className="flex-1 min-h-0 overflow-y-auto pr-1 pb-4">
+      <div className="flex-1 min-h-0 overflow-y-auto pr-2 pb-20">
         {activeDocumentId ? (
           <DocumentEditor
             projectId={projectId}
