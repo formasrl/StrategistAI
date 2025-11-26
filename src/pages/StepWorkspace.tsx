@@ -17,7 +17,7 @@ interface StepWorkspaceOutletContext {
   setIsAiReviewLoading: (isLoading: boolean) => void;
   setDocumentIdForAiPanel: (docId: string | undefined) => void;
   setStepIdForAiPanel: (stepId: string | undefined) => void;
-  handleAttemptInsertContent: (content: string) => void; // New context prop
+  // handleAttemptInsertContent is no longer passed directly through context
 }
 
 const StepWorkspace: React.FC = () => {
@@ -44,7 +44,7 @@ const StepWorkspace: React.FC = () => {
     setIsAiReviewLoading,
     setDocumentIdForAiPanel,
     setStepIdForAiPanel,
-    handleAttemptInsertContent, // Destructure new context prop
+    // handleAttemptInsertContent is no longer destructured here
   } = useOutletContext<StepWorkspaceOutletContext>();
 
   // 1. Resolution Effect

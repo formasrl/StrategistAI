@@ -8,7 +8,6 @@ interface AiPanelProps {
   documentId?: string;
   contentToInsert: string | null;
   setContentToInsert: (content: string | null) => void;
-  handleAttemptInsertContent?: (content: string) => void; // New prop
 }
 
 const AiPanel: React.FC<AiPanelProps> = ({
@@ -18,7 +17,6 @@ const AiPanel: React.FC<AiPanelProps> = ({
   documentId,
   contentToInsert,
   setContentToInsert,
-  handleAttemptInsertContent, // Destructure new prop
 }) => {
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -27,9 +25,8 @@ const AiPanel: React.FC<AiPanelProps> = ({
         phaseId={phaseId}
         stepId={stepId}
         documentId={documentId}
-        contentToInsert={contentToInsert} // Still pass this for now, though its direct use in AiChatbot will change
-        setContentToInsert={setContentToInsert} // Still pass this for now
-        handleAttemptInsertContent={handleAttemptInsertContent} // Pass the new prop
+        contentToInsert={contentToInsert}
+        setContentToInsert={setContentToInsert}
       />
     </div>
   );

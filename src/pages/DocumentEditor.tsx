@@ -43,7 +43,6 @@ type DashboardOutletContext = {
   setStepIdForAiPanel?: (stepId: string | undefined) => void;
   setContentToInsert?: (content: string | null) => void;
   contentToInsert?: string | null;
-  handleAttemptInsertContent?: (content: string) => void; // New prop for AI Chatbot
 };
 
 interface DocumentEditorProps {
@@ -90,8 +89,8 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
     setIsAiReviewLoading: contextSetIsAiReviewLoading,
     setDocumentIdForAiPanel: contextSetDocumentIdForAiPanel,
     setStepIdForAiPanel: contextSetStepIdForAiPanel,
-    contentToInsert,
-    setContentToInsert,
+    contentToInsert, // Now directly consumed from context
+    setContentToInsert, // Now directly consumed from context
   } = outletContext ?? {};
 
   const setAiReviewFn = useCallback(
@@ -261,13 +260,28 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
     showSuccess('Editor content replaced with AI generated text.');
   }, []);
 
-  // Effect to handle content from AI Panel
+  // New function to handle content insertion from AI Chatbot
+  const handleAttemptInsertContent = useCallback(async (newContent: string) => {
+    if (!document) {
+      showError('No document is active to insert content into.');
+      return;
+    }
+
+    if (document.status === 'published') {
+      setContentToInsertAfterDisconnect(newContent);
+      setIsConfirmingInsertDisconnect(true);
+    } else {
+      await insertContentIntoEditor(newContent);
+    }
+  }, [document, insertContentIntoEditor]);
+
+  // Effect to handle content from AI Panel (via Dashboard context)
   useEffect(() => {
     if (contentToInsert && document) {
       handleAttemptInsertContent(contentToInsert);
       setContentToInsert?.(null); // Clear the content from context after handling
     }
-  }, [contentToInsert, document, setContentToInsert]);
+  }, [contentToInsert, document, setContentToInsert, handleAttemptInsertContent]);
 
 
   const handleSave = async () => {
@@ -660,32 +674,6 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
       showError(`Failed to download document: ${error.message}`);
     }
   };
-
-  // New function to handle content insertion from AI Chatbot
-  const handleAttemptInsertContent = useCallback(async (newContent: string) => {
-    if (!document) {
-      showError('No document is active to insert content into.');
-      return;
-    }
-
-    if (document.status === 'published') {
-      setContentToInsertAfterDisconnect(newContent);
-      setIsConfirmingInsertDisconnect(true);
-    } else {
-      await insertContentIntoEditor(newContent);
-    }
-  }, [document, insertContentIntoEditor]);
-
-  // Expose handleAttemptInsertContent via context
-  useEffect(() => {
-    if (outletContext && outletContext.handleAttemptInsertContent !== handleAttemptInsertContent) {
-      // This is a bit of a hack to update the context function if it changes,
-      // but it's necessary for the AI Chatbot to call the latest version.
-      // In a real app, you might use a more robust context management solution.
-      (outletContext as DashboardOutletContext).handleAttemptInsertContent = handleAttemptInsertContent;
-    }
-  }, [outletContext, handleAttemptInsertContent]);
-
 
   const modules = useMemo(
     () => ({

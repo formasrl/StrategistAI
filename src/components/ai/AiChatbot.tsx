@@ -76,11 +76,8 @@ interface AiChatbotProps {
   phaseId?: string;
   stepId?: string;
   documentId?: string;
-  // contentToInsert is no longer directly used here, but kept for type compatibility if needed elsewhere
-  contentToInsert: string | null; 
-  // setContentToInsert is no longer directly used here, but kept for type compatibility if needed elsewhere
-  setContentToInsert: (content: string | null) => void; 
-  handleAttemptInsertContent?: (content: string) => void; // New prop
+  setContentToInsert: (content: string | null) => void;
+  // contentToInsert is no longer needed as a prop here
 }
 
 interface UploadedFile {
@@ -97,7 +94,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
   phaseId,
   stepId,
   documentId,
-  handleAttemptInsertContent, // Destructure new prop
+  setContentToInsert,
 }) => {
   const { session } = useSession();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -692,11 +689,8 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
       showError('Please navigate to a document to insert content.');
       return;
     }
-    if (handleAttemptInsertContent) {
-      handleAttemptInsertContent(content);
-    } else {
-      showError('Editor is not ready to receive content. Please try again.');
-    }
+    setContentToInsert(content); // Directly call setContentToInsert from props
+    showSuccess('Content sent to editor. Check the document editor panel!');
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
