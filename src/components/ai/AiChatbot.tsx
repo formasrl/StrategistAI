@@ -130,11 +130,25 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
       data: msg,
     }));
 
-    const reviewEntries: TimelineEntry[] = reviews.map((review) => ({
-      kind: 'review',
-      timestamp: review.review_timestamp ?? new Date(review.created_at ?? Date.now()).toISOString(),
-      data: review,
-    }));
+    const reviewEntries: TimelineEntry[] = reviews.map((review) => {
+      // Safely handle timestamp. Supabase types might differ from runtime.
+      // Force a string or use current time to avoid RangeError on toISOString.
+      const reviewAny = review as any;
+      const rawTime = review.review_timestamp || reviewAny.created_at;
+      let timestamp: string;
+      
+      if (rawTime) {
+        timestamp = rawTime;
+      } else {
+        timestamp = new Date().toISOString();
+      }
+
+      return {
+        kind: 'review',
+        timestamp,
+        data: review,
+      };
+    });
 
     return [...messageEntries, ...reviewEntries].sort(
       (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
@@ -723,37 +737,42 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
     }
   };
 
-  const renderReviewEntry = (review: AiReview) => (
-    <div
-      key={review.id}
-      className="flex w-full gap-3 justify-start"
-    >
-      <div className="h-8 w-8 rounded-full bg-purple-100 dark:bg-purple-900/50 flex items-center justify-center flex-shrink-0 mt-1">
-        <Sparkles className="h-4 w-4 text-purple-600 dark:text-purple-300" />
-      </div>
-      <div className="px-4 py-3 rounded-2xl bg-card border border-border text-card-foreground rounded-tl-sm w-full">
-        <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-          <span>{formatDateTime(review.review_timestamp, 'MMM d, yyyy HH:mm')}</span>
-          {review.readiness && (
-            <Badge variant={review.readiness === 'ready' ? 'default' : 'secondary'}>
-              {review.readiness.replace('_', ' ').toUpperCase()}
-            </Badge>
-          )}
+  const renderReviewEntry = (review: AiReview) => {
+    const reviewAny = review as any;
+    const displayDate = review.review_timestamp || reviewAny.created_at || new Date().toISOString();
+    
+    return (
+      <div
+        key={review.id}
+        className="flex w-full gap-3 justify-start"
+      >
+        <div className="h-8 w-8 rounded-full bg-purple-100 dark:bg-purple-900/50 flex items-center justify-center flex-shrink-0 mt-1">
+          <Sparkles className="h-4 w-4 text-purple-600 dark:text-purple-300" />
         </div>
-        <p className="text-sm mt-1">
-          {review.summary || 'No summary available.'}
-        </p>
-        <Button
-          variant="secondary"
-          size="sm"
-          className="mt-2"
-          onClick={() => handleOpenReview(review)}
-        >
-          View Review
-        </Button>
+        <div className="px-4 py-3 rounded-2xl bg-card border border-border text-card-foreground rounded-tl-sm w-full">
+          <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+            <span>{formatDateTime(displayDate, 'MMM d, yyyy HH:mm')}</span>
+            {review.readiness && (
+              <Badge variant={review.readiness === 'ready' ? 'default' : 'secondary'}>
+                {review.readiness.replace('_', ' ').toUpperCase()}
+              </Badge>
+            )}
+          </div>
+          <p className="text-sm mt-1">
+            {review.summary || 'No summary available.'}
+          </p>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="mt-2"
+            onClick={() => handleOpenReview(review)}
+          >
+            View Review
+          </Button>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   if (isLoadingResolution || isLoadingHistory || isLoadingReviews) {
     return (
