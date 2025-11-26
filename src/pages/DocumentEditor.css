@@ -1,18 +1,18 @@
 .quill-editor-container {
-  flex: 1;
   display: flex;
   flex-direction: column;
-  min-height: 300px;
+  /* Removed min-height here to let it grow naturally or via Tailwind classes */
 }
 
 .quill-editor-container .ql-container {
-  flex: 1;
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  flex: 1;
+  min-height: 300px; /* Ensure decent minimum height for editor */
+  /* Removed overflow-y: auto to let the editor expand with content */
 }
 
 .quill-editor-container .ql-editor {
   flex: 1;
-  min-height: 200px;
+  min-height: 300px;
 }

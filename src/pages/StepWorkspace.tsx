@@ -26,7 +26,7 @@ const StepWorkspace: React.FC = () => {
   const [step, setStep] = useState<Step | null>(null);
   const [isLoadingStep, setIsLoadingStep] = useState(true);
   
-  // Resolved IDs (we need both a step ID and a document ID to render everything)
+  // Resolved IDs
   const [resolvedStepId, setResolvedStepId] = useState<string | undefined>(paramStepId);
   const [activeDocumentId, setActiveDocumentId] = useState<string | undefined>(paramDocumentId);
   
@@ -40,16 +40,13 @@ const StepWorkspace: React.FC = () => {
     setStepIdForAiPanel,
   } = useOutletContext<StepWorkspaceOutletContext>();
 
-  // 1. Resolution Effect: Determine Step ID and Document ID based on URL params
+  // 1. Resolution Effect
   useEffect(() => {
     const resolveContext = async () => {
       setIsLoadingResolution(true);
 
-      // CASE A: Accessed via /document/:documentId
       if (paramDocumentId && !paramStepId) {
-        // We know the document, but need to find the step
         setActiveDocumentId(paramDocumentId);
-        
         const { data: docData, error: docError } = await supabase
           .from('documents')
           .select('step_id')
@@ -63,11 +60,8 @@ const StepWorkspace: React.FC = () => {
           setResolvedStepId(docData.step_id);
         }
       } 
-      // CASE B: Accessed via /step/:stepId
       else if (paramStepId) {
         setResolvedStepId(paramStepId);
-        
-        // If document ID wasn't in URL, find the default/primary document for this step
         if (!paramDocumentId) {
           const { data: docs, error: docsError } = await supabase
             .from('documents')
@@ -80,7 +74,6 @@ const StepWorkspace: React.FC = () => {
           } else if (docs && docs.length > 0) {
             setActiveDocumentId(docs[0].id);
           } else {
-            // No document exists yet, will need to create one (handled later or by user action)
             setActiveDocumentId(undefined);
           }
         } else {
@@ -94,7 +87,7 @@ const StepWorkspace: React.FC = () => {
     resolveContext();
   }, [paramStepId, paramDocumentId]);
 
-  // 2. Fetch Step Data Effect (runs once we have a resolvedStepId)
+  // 2. Fetch Step Data Effect
   useEffect(() => {
     const fetchStepDetails = async () => {
       if (!resolvedStepId) {
@@ -121,12 +114,10 @@ const StepWorkspace: React.FC = () => {
     fetchStepDetails();
   }, [resolvedStepId, isLoadingResolution]);
 
-  // 3. Handle Creation of Default Document if needed (Case B only)
+  // 3. Handle Creation of Default Document if needed
   useEffect(() => {
     const createDefaultDocIfNeeded = async () => {
-      // Only create if we are fully loaded, have a step, but NO document yet
       if (!isLoadingResolution && !isLoadingStep && step && !activeDocumentId && projectId && resolvedStepId) {
-        
         const newDocumentName = `${step.step_name} Document`;
         const { data: newDocData, error: createDocError } = await supabase
           .from('documents')
@@ -195,9 +186,9 @@ const StepWorkspace: React.FC = () => {
   const guidingQuestions = (step.guiding_questions as string[]) || [];
 
   return (
-    <div className="flex flex-col h-full space-y-4 overflow-hidden">
+    <div className="flex flex-col h-full overflow-hidden">
       {/* Guidance Section - Fixed at top (shrink-0) */}
-      <div className="shrink-0">
+      <div className="shrink-0 pb-4 z-10 bg-background">
         <Collapsible open={isGuidanceOpen} onOpenChange={setIsGuidanceOpen}>
           <Card className="w-full border-l-4 border-l-blue-500 shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between p-4 pb-2 space-y-0">
@@ -248,8 +239,8 @@ const StepWorkspace: React.FC = () => {
         </Collapsible>
       </div>
 
-      {/* Editor Section - Fills remaining space */}
-      <div className="flex-1 min-h-0">
+      {/* Editor Section - Scrollable Area */}
+      <div className="flex-1 min-h-0 overflow-y-auto pr-1 pb-4">
         {activeDocumentId ? (
           <DocumentEditor
             projectId={projectId}

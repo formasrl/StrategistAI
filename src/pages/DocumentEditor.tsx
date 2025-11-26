@@ -702,8 +702,8 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
   const showPublishedBanner = isPublished && !isHistoricalView;
 
   return (
-    <div className="flex flex-col h-full space-y-4">
-      <Card className="w-full flex-1 flex flex-col">
+    <div className="flex flex-col space-y-4">
+      <Card className="w-full flex flex-col">
         <CardHeader className="flex flex-row items-start justify-between">
           <DocumentHeader
             title={document.document_name}
@@ -745,7 +745,7 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
             />
           </div>
         </CardHeader>
-        <CardContent className="flex-1 flex flex-col p-6 pt-0 relative min-h-[300px]">
+        <CardContent className="flex flex-col p-6 pt-0 relative min-h-[500px]">
           {showPublishedBanner && (
             <div className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200">
               This document is published to RAG and locked for edits. Use “Disconnect” to make changes again.
@@ -766,7 +766,7 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({
             formats={formats}
             readOnly={isHistoricalView || isPublished || isUploadingFile}
             placeholder="Start writing your document here..."
-            className={cn("quill-editor-container", "min-h-[400px]")}
+            className={cn("quill-editor-container", "flex-1")}
           />
           <input
             type="file"
