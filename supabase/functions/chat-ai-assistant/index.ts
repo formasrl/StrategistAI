@@ -96,6 +96,18 @@ interface UploadedFile {
   content: string;
 }
 
+interface AiReviewRecord {
+  id: string;
+  summary: string | null;
+  strengths: string[] | null;
+  issues: string[] | null;
+  suggestions: string[] | null;
+  consistency_issues: string[] | null;
+  readiness: string | null;
+  readiness_reason: string | null;
+  review_timestamp: string | null;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -115,7 +127,7 @@ serve(async (req) => {
       documentId,
       chatSessionId: incomingChatSessionId,
       stream = true,
-      uploadedFiles, // New: array of uploaded files
+      uploadedFiles,
     }: {
       message?: string;
       projectId?: string;
@@ -130,7 +142,6 @@ serve(async (req) => {
       return respond({ error: "message and projectId are required." }, 400);
     }
 
-    // Relaxed validation: we need EITHER stepId OR documentId (from which we can derive stepId)
     if (!stepId && !documentId) {
       return respond({ error: "Either stepId or documentId is required." }, 400);
     }
@@ -158,7 +169,6 @@ serve(async (req) => {
       currentChatSessionId = newSession.id;
     }
 
-    // Format file names for the user message
     let userMessageContent = message;
     if (uploadedFiles && uploadedFiles.length > 0) {
       const fileNames = uploadedFiles.map(f => f.name).join(", ");
@@ -171,7 +181,6 @@ serve(async (req) => {
       content: userMessageContent,
     });
 
-    // Layer 1: Project Profile
     const { data: projectData, error: projectError } = await supabaseClient
       .from("projects")
       .select("id, user_id, name, one_liner, audience, positioning, constraints, project_profile")
@@ -189,7 +198,6 @@ serve(async (req) => {
     }
     let currentProjectProfileText = fetchProjectProfileText(project);
 
-    // Layer 2: Current Document Context
     let currentDocumentContextText: string | null = null;
     let currentDocumentContentExcerpt: string | null = null;
     let documentSummaryForSemanticSearch: string | undefined;
@@ -208,7 +216,6 @@ serve(async (req) => {
         return respond({ error: "Document does not belong to the provided project." }, 403);
       }
 
-      // Derive stepId from document if missing
       if (!effectiveStepId) {
         effectiveStepId = documentDetails.step_id;
       } else if (documentDetails.step_id !== effectiveStepId) {
@@ -232,7 +239,24 @@ serve(async (req) => {
       return respond({ error: "Could not determine active step context." }, 400);
     }
 
-    // Layer 3: Semantic Retrieval (search_document_embeddings)
+    let reviewContextSection: string | null = null;
+    if (documentId) {
+      const { data: reviewData, error: reviewError } = await supabaseClient
+        .from("ai_reviews")
+        .select("id, summary, strengths, issues, suggestions, consistency_issues, readiness, readiness_reason, review_timestamp")
+        .eq("document_id", documentId)
+        .order("review_timestamp", { ascending: false })
+        .limit(3);
+
+      if (reviewError) {
+        console.error("Failed to load AI reviews for context", reviewError);
+      } else if (reviewData && reviewData.length > 0) {
+        reviewContextSection = formatReviewContext(reviewData as AiReviewRecord[]);
+      } else {
+        reviewContextSection = "No AI reviews exist for this document yet.";
+      }
+    }
+
     const queryTextForSemanticSearch =
       documentSummaryForSemanticSearch && documentSummaryForSemanticSearch.trim() !== ""
         ? documentSummaryForSemanticSearch
@@ -240,7 +264,6 @@ serve(async (req) => {
 
     const queryEmbedding = await createEmbedding(openAIKeyResult.key, queryTextForSemanticSearch);
 
-    // Log embedding AI usage
     await logAiUsage(
       supabaseClient,
       project.id,
@@ -248,7 +271,7 @@ serve(async (req) => {
       "chat-ai-assistant (embedding)",
       EMBEDDING_MODEL,
       queryTextForSemanticSearch.length,
-      queryEmbedding.length // Log dimension for embedding output length
+      queryEmbedding.length
     );
 
     const { data: semanticMatchesData, error: rpcError } = await supabaseClient.rpc(
@@ -278,7 +301,6 @@ serve(async (req) => {
       };
     });
 
-    // Layer 4: Current Step Info
     const { data: stepData, error: stepError } = await supabaseClient
       .from("steps")
       .select(
@@ -296,7 +318,6 @@ serve(async (req) => {
     const step = stepData as StepRecord;
     let currentStepDefinition = formatStepDefinition(step);
 
-    // Layer 5: Recent Conversation History
     const { data: recentMessagesData, error: recentMessagesError } = await supabaseClient
       .from("chat_messages")
       .select("role, content, created_at")
@@ -313,26 +334,33 @@ serve(async (req) => {
       MAX_HISTORY_CHARS
     );
 
-    // SYSTEM PROMPT – enforce concise answers & guiding question behavior
+    let uploadedFilesContent = "";
+    if (uploadedFiles && uploadedFiles.length > 0) {
+      const charsPerFile = Math.floor(TRUNCATION_CHAR_LIMIT / uploadedFiles.length);
+      uploadedFilesContent = uploadedFiles.map(f => 
+        `--- FILE: ${f.name} ---\n${truncateToChars(f.content, charsPerFile)}`
+      ).join("\n\n");
+    }
+
     const systemPrompt = [
       "You are StrategistAI, a senior brand strategist and coach.",
       "The user is working on brand strategy documents. Your role is to help them complete specific steps in a roadmap.",
       "",
       "CONTEXT AWARENESS:",
       "- You have access to the 'CURRENT STEP' details, including its Goal, Guiding Questions, and Expected Output.",
-      "- You have access to the 'PROJECT PROFILE' and 'RELEVANT SEMANTIC MEMORIES'.",
+      "- You have access to the 'PROJECT PROFILE', 'RECENT AI REVIEWS', and 'RELEVANT SEMANTIC MEMORIES'.",
       "- Treat the Guiding Questions as the blueprint for the document.",
       "",
       "MODES OF OPERATION:",
       "1) ADVISORY / Q&A MODE:",
       "- Triggered when the user asks questions, wants clarification, or is not explicitly asking you to 'write', 'draft', 'generate', or 'fill out' the step.",
       "- Give concise answers (1–3 short paragraphs or up to 5 bullets).",
-      "- Reference Guiding Questions and prior decisions when relevant, but DO NOT output a full draft document.",
+      "- Reference Guiding Questions, reviews, and prior decisions when relevant, but DO NOT output a full draft document.",
       "",
       "2) GENERATION / DRAFTING MODE:",
       "- Triggered when the user asks you to 'do the step', 'write the document', 'fill this out', 'generate the draft', or similar.",
-      "- FIRST: Inspect the Guiding Questions listed in the CURRENT STEP.",
-      "- For each question, check whether the answer is clearly present in the PROJECT PROFILE, RELEVANT SEMANTIC MEMORIES, UPLOADED FILES CONTENT, RECENT CONVERSATION, or the user's latest message.",
+      "- FIRST: Inspect the Guiding Questions listed in the CURRENT STEP and the summaries from RECENT AI REVIEWS.",
+      "- For each question, check whether the answer is clearly present in the PROJECT PROFILE, RECENT AI REVIEWS, RELEVANT SEMANTIC MEMORIES, UPLOADED FILES CONTENT, RECENT CONVERSATION, or the user's latest message.",
       "- If ANY guiding question cannot be reasonably answered from available information, DO NOT generate the full document yet.",
       "- Instead, respond concisely with 1–2 short paragraphs asking the user for the missing information, explicitly listing which questions still need answers.",
       "- ONLY AFTER the user has provided enough detail to reasonably address all Guiding Questions should you generate a full draft.",
@@ -352,25 +380,16 @@ serve(async (req) => {
       "- If the user has not asked for a full draft, stay in Q&A mode and keep replies concise.",
       "- Never invent firm factual details that contradict known project information; if something is unknown, call it out and offer a reasonable suggestion.",
       "- Be explicit when you need more information: quote or paraphrase the exact Guiding Questions that are missing answers.",
-    ].join("\n");
+      "- When referencing RECENT AI REVIEWS, clearly explain why previous reviews highlighted certain strengths or issues if the user asks.",
+    ].join(" ");
 
-    const modelTokenLimit = getModelTokenLimit(CHAT_MODEL);
-
-    // Prepare Uploaded Files Content
-    let uploadedFilesContent = "";
-    if (uploadedFiles && uploadedFiles.length > 0) {
-      // Simple truncation strategy: Divide limit by number of files
-      const charsPerFile = Math.floor(TRUNCATION_CHAR_LIMIT / uploadedFiles.length);
-      uploadedFilesContent = uploadedFiles.map(f => 
-        `--- FILE: ${f.name} ---\n${truncateToChars(f.content, charsPerFile)}`
-      ).join("\n\n");
-    }
-
-    // Assemble layers in order
     const promptParts: string[] = [];
     promptParts.push(`PROJECT PROFILE:\n${currentProjectProfileText}`);
     if (currentDocumentContextText) {
       promptParts.push(`CURRENT DOCUMENT CONTEXT:\n${currentDocumentContextText}`);
+    }
+    if (reviewContextSection) {
+      promptParts.push(`RECENT AI REVIEWS:\n${reviewContextSection}`);
     }
     promptParts.push(`RELEVANT SEMANTIC MEMORIES:\n${formattedSemanticMemories}`);
     promptParts.push(`CURRENT STEP:\n${currentStepDefinition}`);
@@ -388,41 +407,40 @@ serve(async (req) => {
     let finalPrompt = promptParts.join("\n\n");
     let totalPromptTokens = countTokens(systemPrompt + finalPrompt);
 
-    console.log(
-      `[chat-ai-assistant] Initial prompt token count: ${totalPromptTokens} for model: ${CHAT_MODEL}`
-    );
+    const modelTokenLimit = getModelTokenLimit(CHAT_MODEL);
 
-    // Truncation logic (simplified for multiple files)
     if (totalPromptTokens > modelTokenLimit) {
-      console.log(`[chat-ai-assistant] Prompt exceeds ${modelTokenLimit} tokens. Attempting truncation.`);
-      
-      // Truncate file content further if needed (reduce by half)
       if (uploadedFilesContent && countTokens(uploadedFilesContent) > 1000) {
-         const halfLimit = Math.floor(TRUNCATION_CHAR_LIMIT / 2);
-         const charsPerFile = uploadedFiles ? Math.floor(halfLimit / uploadedFiles.length) : 0;
-         uploadedFilesContent = uploadedFiles ? uploadedFiles.map(f => 
-            `--- FILE: ${f.name} ---\n${truncateToChars(f.content, charsPerFile)}`
-          ).join("\n\n") : "";
-         
-         // Rebuild prompt
-         finalPrompt = rebuildPrompt(
-            currentProjectProfileText,
-            currentDocumentContextText,
-            formattedSemanticMemories,
-            currentStepDefinition,
-            currentConversationSnippet,
-            currentDocumentContentExcerpt,
-            uploadedFilesContent,
-            message
-         );
-         totalPromptTokens = countTokens(systemPrompt + finalPrompt);
+        const halfLimit = Math.floor(TRUNCATION_CHAR_LIMIT / 2);
+        const charsPerFile = uploadedFiles ? Math.floor(halfLimit / uploadedFiles.length) : 0;
+        uploadedFilesContent = uploadedFiles ? uploadedFiles.map(f => 
+          `--- FILE: ${f.name} ---\n${truncateToChars(f.content, charsPerFile)}`
+        ).join("\n\n") : "";
+
+        finalPrompt = rebuildPrompt(
+          currentProjectProfileText,
+          currentDocumentContextText,
+          formattedSemanticMemories,
+          reviewContextSection,
+          currentStepDefinition,
+          currentConversationSnippet,
+          currentDocumentContentExcerpt,
+          uploadedFilesContent,
+          message
+        );
+        totalPromptTokens = countTokens(systemPrompt + finalPrompt);
       }
-      
-      // Further truncation logic for other parts if needed... (reusing previous logic pattern if necessary)
-      // For brevity, assuming file truncation helps most as it's the new large input.
+
+      if (totalPromptTokens > modelTokenLimit) {
+        return respond(
+          {
+            error: `Your review request is too long (${totalPromptTokens} tokens). Even after truncating document content, it exceeds the model's ${modelTokenLimit} token limit. Please shorten your document content.`,
+          },
+          400,
+        );
+      }
     }
 
-    // ---------- Non-streaming mode ----------
     if (!stream) {
       const chatResponse = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
@@ -433,7 +451,7 @@ serve(async (req) => {
         body: JSON.stringify({
           model: CHAT_MODEL,
           temperature: 0.5,
-          max_tokens: 1200, // Increased to allow for full document generation
+          max_tokens: 1200,
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: finalPrompt },
@@ -467,7 +485,6 @@ serve(async (req) => {
         fullReplyContent.length
       );
 
-      // Check for insert_content JSON block
       let insertContent: string | undefined;
       const jsonBlockMatch = fullReplyContent.match(/```json\n?({[\s\S]*?})\n?```/);
       if (jsonBlockMatch && jsonBlockMatch[1]) {
@@ -490,7 +507,6 @@ serve(async (req) => {
       });
     }
 
-    // ---------- Streaming SSE mode ----------
     const chatResponse = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -500,7 +516,7 @@ serve(async (req) => {
       body: JSON.stringify({
         model: CHAT_MODEL,
         temperature: 0.5,
-        max_tokens: 1200, // Increased
+        max_tokens: 1200,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: finalPrompt },
@@ -567,7 +583,6 @@ serve(async (req) => {
             fullReplyContent.length
           );
 
-          // Check for insert_content JSON block
           let insertContent: string | undefined;
           const jsonBlockMatch = fullReplyContent.match(/```json\n?({[\s\S]*?})\n?```/);
           if (jsonBlockMatch && jsonBlockMatch[1]) {
@@ -623,6 +638,7 @@ function rebuildPrompt(
   projectProfile: string,
   documentContext: string | null,
   semanticMemories: string,
+  reviewContext: string | null,
   stepDefinition: string,
   conversationSnippet: string | null,
   documentExcerpt: string | null,
@@ -633,6 +649,9 @@ function rebuildPrompt(
   parts.push(`PROJECT PROFILE:\n${projectProfile}`);
   if (documentContext) {
     parts.push(`CURRENT DOCUMENT CONTEXT:\n${documentContext}`);
+  }
+  if (reviewContext) {
+    parts.push(`RECENT AI REVIEWS:\n${reviewContext}`);
   }
   parts.push(`RELEVANT SEMANTIC MEMORIES:\n${semanticMemories}`);
   parts.push(`CURRENT STEP:\n${stepDefinition}`);
@@ -761,6 +780,28 @@ function formatSemanticSearchResults(matches: SemanticMatch[]): string {
       ]
         .filter(Boolean)
         .join("\n");
+    })
+    .join("\n\n");
+}
+
+function formatReviewContext(reviews: AiReviewRecord[]): string {
+  return reviews
+    .map((review, index) => {
+      const strengths = review.strengths?.slice(0, 2).map((item) => `  • ${item}`) ?? ["  • None listed."];
+      const issues = review.issues?.slice(0, 2).map((item) => `  • ${item}`) ?? ["  • None listed."];
+      const suggestions = review.suggestions?.slice(0, 2).map((item) => `  • ${item}`) ?? ["  • None listed."];
+
+      return [
+        `${index + 1}. Review Timestamp: ${review.review_timestamp ?? "Unknown"}`,
+        `  Readiness: ${review.readiness ?? "not_specified"}${review.readiness_reason ? ` (${review.readiness_reason})` : ""}`,
+        `  Summary: ${review.summary ?? "Not provided."}`,
+        "  Strengths:",
+        ...strengths,
+        "  Issues:",
+        ...issues,
+        "  Suggestions:",
+        ...suggestions,
+      ].join("\n");
     })
     .join("\n\n");
 }

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -14,6 +14,7 @@ import {
   X,
   History as HistoryIcon,
   Trash2,
+  Sparkles,
 } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { supabase } from '@/integrations/supabase/client';
@@ -41,6 +42,9 @@ import {
   getLastActiveChatSession,
   clearLastActiveChatSession,
 } from '@/utils/localStorage';
+import ReviewDialog from './ReviewDialog';
+import { AiReview } from '@/types/supabase';
+import { formatDateTime } from '@/utils/dateUtils';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   'https://unpkg.com/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs';
@@ -73,12 +77,17 @@ interface AiChatbotProps {
   stepId?: string;
   documentId?: string;
   setContentToInsert: (content: string | null) => void;
+  contentToInsert: string | null;
 }
 
 interface UploadedFile {
   name: string;
   content: string;
 }
+
+type TimelineEntry =
+  | { kind: 'message'; timestamp: string; data: ChatMessage }
+  | { kind: 'review'; timestamp: string; data: AiReview };
 
 const AiChatbot: React.FC<AiChatbotProps> = ({
   projectId,
@@ -103,19 +112,41 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
   );
   const [isLoadingSessions, setIsLoadingSessions] = useState(false);
   const [isHistoryCollapsed, setIsHistoryCollapsed] = useState(true);
-  const [isNewChatActiveForComposition, setIsNewChatActiveForComposition] = useState(false); // New state
+  const [isNewChatActiveForComposition, setIsNewChatActiveForComposition] = useState(false);
+
+  const [reviews, setReviews] = useState<AiReview[]>([]);
+  const [isLoadingReviews, setIsLoadingReviews] = useState(false);
+  const [isGeneratingReview, setIsGeneratingReview] = useState(false);
+  const [isReviewDialogOpen, setIsReviewDialogOpen] = useState(false);
+  const [selectedReview, setSelectedReview] = useState<AiReview | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Auto-scroll as messages change
+  const timelineEntries: TimelineEntry[] = useMemo(() => {
+    const messageEntries: TimelineEntry[] = messages.map((msg) => ({
+      kind: 'message',
+      timestamp: msg.timestamp,
+      data: msg,
+    }));
+
+    const reviewEntries: TimelineEntry[] = reviews.map((review) => ({
+      kind: 'review',
+      timestamp: review.review_timestamp ?? new Date(review.created_at ?? Date.now()).toISOString(),
+      data: review,
+    }));
+
+    return [...messageEntries, ...reviewEntries].sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+    );
+  }, [messages, reviews]);
+
   useEffect(() => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
-  }, [messages, isSending, uploadedFiles]);
+  }, [timelineEntries.length, isSending, isGeneratingReview, uploadedFiles.length]);
 
-  // Helper: load all messages for a session
   const fetchMessagesForSession = useCallback(async (sessionId: string) => {
     const { data: messagesData, error: messagesError } = await supabase
       .from('chat_messages')
@@ -166,7 +197,6 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
     });
   }, []);
 
-  // Initial load: sessions + possibly restore last active session
   useEffect(() => {
     let isMounted = true;
 
@@ -181,7 +211,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
         setCurrentChatSessionId(undefined);
         setSelectedChatSessionId(undefined);
         setUploadedFiles([]);
-        setIsNewChatActiveForComposition(false); // Reset initially
+        setIsNewChatActiveForComposition(false);
       }
 
       try {
@@ -222,7 +252,6 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
             const loadedMessages = await fetchMessagesForSession(sessionToLoadId);
             if (isMounted) setMessages(loadedMessages);
           } else {
-            // No sessions found, automatically activate for composition
             if (isMounted) setIsNewChatActiveForComposition(true);
           }
         }
@@ -243,6 +272,33 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
     };
   }, [projectId, stepId, documentId, fetchMessagesForSession]);
 
+  useEffect(() => {
+    if (!documentId) {
+      setReviews([]);
+      return;
+    }
+
+    const fetchReviews = async () => {
+      setIsLoadingReviews(true);
+      const { data, error } = await supabase
+        .from('ai_reviews')
+        .select('*')
+        .eq('document_id', documentId)
+        .order('review_timestamp', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching reviews:', error);
+        showError(`Failed to load reviews: ${error.message}`);
+        setReviews([]);
+      } else {
+        setReviews(data || []);
+      }
+      setIsLoadingReviews(false);
+    };
+
+    fetchReviews();
+  }, [documentId]);
+
   const handleSelectSession = useCallback(
     async (sessionId: string) => {
       if (sessionId === selectedChatSessionId) return;
@@ -251,7 +307,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
       setSelectedChatSessionId(sessionId);
       setCurrentChatSessionId(sessionId);
       setUploadedFiles([]);
-      setIsNewChatActiveForComposition(false); // Not a new chat, so reset this
+      setIsNewChatActiveForComposition(false);
       if (projectId) {
         saveLastActiveChatSession(projectId, stepId, documentId, sessionId);
       }
@@ -263,7 +319,6 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
     [selectedChatSessionId, projectId, stepId, documentId, fetchMessagesForSession],
   );
 
-  // Subscribe for realtime messages in active session
   useEffect(() => {
     if (!currentChatSessionId) return;
 
@@ -390,7 +445,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
         setCurrentChatSessionId(data.chatSessionId);
         setSelectedChatSessionId(data.chatSessionId);
         saveLastActiveChatSession(projectId, stepId, documentId, data.chatSessionId);
-        setIsNewChatActiveForComposition(false); // Reset after session is established
+        setIsNewChatActiveForComposition(false);
 
         const { data: updatedSessions, error: updateError } = await supabase
           .from('chat_sessions')
@@ -430,7 +485,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
     setUploadedFiles([]);
     setIsHistoryCollapsed(true);
     if (projectId) clearLastActiveChatSession(projectId, stepId, documentId);
-    setIsNewChatActiveForComposition(true); // Set to true to show input
+    setIsNewChatActiveForComposition(true);
     showSuccess('New chat session started.');
   };
 
@@ -453,7 +508,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
       if (sessionId === currentChatSessionId) {
         setCurrentChatSessionId(undefined);
         setMessages([]);
-        setIsNewChatActiveForComposition(true); // If active session deleted, prepare for new chat
+        setIsNewChatActiveForComposition(true);
       }
       if (sessionId === selectedChatSessionId) {
         setSelectedChatSessionId(undefined);
@@ -600,7 +655,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
     if (newUploadedFiles.length > 0) {
       setUploadedFiles((prev) => [...prev, ...newUploadedFiles]);
       showSuccess(`${newUploadedFiles.length} file(s) added.`);
-      setIsNewChatActiveForComposition(true); // If files are added, activate composer
+      setIsNewChatActiveForComposition(true);
     }
 
     if (fileInputRef.current) {
@@ -610,7 +665,6 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
 
   const handleRemoveFile = (index: number) => {
     setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
-    // If no files and no input message, and no active session, hide composer
     if (uploadedFiles.length === 1 && inputMessage.trim().length === 0 && !currentChatSessionId) {
       setIsNewChatActiveForComposition(false);
     }
@@ -625,10 +679,9 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
     showSuccess('Content sent to editor. Check the document editor panel!');
   };
 
-  // Shift+Enter => newline, Enter => send
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && e.shiftKey) {
-      return; // allow native newline
+      return;
     }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -636,15 +689,84 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
     }
   };
 
-  // Input should be visible if:
-  // - we already have a chat session, OR
-  // - the user has started typing, OR
-  // - there are files attached, OR
-  // - a new chat has been explicitly started for composition.
   const hasActiveComposer =
     !!currentChatSessionId || inputMessage.trim().length > 0 || uploadedFiles.length > 0 || isNewChatActiveForComposition;
 
-  const hasAnySession = availableChatSessions.length > 0;
+  const handleOpenReview = (review: AiReview) => {
+    setSelectedReview(review);
+    setIsReviewDialogOpen(true);
+  };
+
+  const handleGenerateReview = async () => {
+    if (!documentId || !projectId) {
+      showError('Open a document to generate a review.');
+      return;
+    }
+    setIsGeneratingReview(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('generate-ai-review', {
+        body: { documentId, projectId },
+      });
+
+      if (error) throw error;
+
+      const newReview = data.review as AiReview;
+      setReviews((prev) => [newReview, ...prev]);
+      setSelectedReview(newReview);
+      setIsReviewDialogOpen(true);
+      showSuccess('AI review generated.');
+    } catch (error: any) {
+      console.error('Error generating review:', error);
+      showError(`Failed to generate review: ${error.message}`);
+    } finally {
+      setIsGeneratingReview(false);
+    }
+  };
+
+  const renderReviewEntry = (review: AiReview) => (
+    <div
+      key={review.id}
+      className="flex w-full gap-3 justify-start"
+    >
+      <div className="h-8 w-8 rounded-full bg-purple-100 dark:bg-purple-900/50 flex items-center justify-center flex-shrink-0 mt-1">
+        <Sparkles className="h-4 w-4 text-purple-600 dark:text-purple-300" />
+      </div>
+      <div className="px-4 py-3 rounded-2xl bg-card border border-border text-card-foreground rounded-tl-sm w-full">
+        <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+          <span>{formatDateTime(review.review_timestamp, 'MMM d, yyyy HH:mm')}</span>
+          {review.readiness && (
+            <Badge variant={review.readiness === 'ready' ? 'default' : 'secondary'}>
+              {review.readiness.replace('_', ' ').toUpperCase()}
+            </Badge>
+          )}
+        </div>
+        <p className="text-sm mt-1">
+          {review.summary || 'No summary available.'}
+        </p>
+        <Button
+          variant="secondary"
+          size="sm"
+          className="mt-2"
+          onClick={() => handleOpenReview(review)}
+        >
+          View Review
+        </Button>
+      </div>
+    </div>
+  );
+
+  if (isLoadingResolution || isLoadingHistory || isLoadingReviews) {
+    return (
+      <Card className="flex flex-col h-full border-none shadow-none bg-transparent">
+        <CardContent className="flex-1 flex flex-col justify-center items-center text-muted-foreground">
+          <Loader2 className="h-6 w-6 animate-spin mb-2" />
+          Loading assistant…
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const timelineIsEmpty = timelineEntries.length === 0;
 
   return (
     <Card className="flex flex-col h-full border-none shadow-none bg-transparent">
@@ -654,15 +776,23 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
           <span className="truncate">{getContextTitle()}</span>
         </CardTitle>
         <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={handleGenerateReview}
+            disabled={isGeneratingReview || !documentId}
+          >
+            {isGeneratingReview ? (
+              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+            ) : (
+              <Sparkles className="h-4 w-4 mr-2" />
+            )}
+            Review
+          </Button>
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={handleNewChat}
-                  className="h-8 w-8"
-                >
+                <Button variant="ghost" size="icon" onClick={handleNewChat} className="h-8 w-8">
                   <PlusCircle className="h-4 w-4 text-muted-foreground" />
                 </Button>
               </TooltipTrigger>
@@ -689,7 +819,6 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
 
       <CardContent className="flex-1 p-0 overflow-hidden relative bg-background/50">
         <ScrollArea className="h-full p-4">
-          {/* History only when toggled open */}
           <Collapsible
             open={!isHistoryCollapsed}
             onOpenChange={setIsHistoryCollapsed}
@@ -760,107 +889,106 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
           </Collapsible>
 
           <div className="space-y-6 pb-4 min-h-[200px]">
-            {/* Empty-state: no sessions and no messages -> show big Start New Chat button */}
-            {!isLoadingHistory &&
-              !hasAnySession &&
-              messages.length === 0 && !isNewChatActiveForComposition && (
-                <div className="flex flex-col items-center justify-center h-[300px] text-center text-muted-foreground px-8">
-                  <Bot className="h-12 w-12 mb-3 opacity-20" />
-                  <p className="mb-3">
-                    Start a conversation with StrategistAI about this project.
-                  </p>
-                  <Button onClick={handleNewChat}>
-                    <PlusCircle className="mr-2 h-4 w-4" />
-                    Start New Chat
-                  </Button>
-                </div>
-              )}
+            {!timelineIsEmpty && timelineEntries.length === reviews.length && (
+              <div className="flex flex-col items-center justify-center h-[300px] text-center text-muted-foreground px-8">
+                <Bot className="h-12 w-12 mb-3 opacity-20" />
+                <p>Ask StrategistAI about your project.</p>
+                <p className="text-sm mt-2">
+                  Upload files (PDF, DOCX, MD) to get analysis or generate a review first.
+                </p>
+              </div>
+            )}
 
-            {/* Standard blank state when there is some context (e.g., step / doc) but no messages yet */}
-            {!isLoadingHistory &&
-              (hasAnySession || messages.length > 0 || isNewChatActiveForComposition) &&
-              messages.length === 0 && (
-                <div className="flex flex-col items-center justify-center h-[300px] text-center text-muted-foreground px-8">
-                  <Bot className="h-12 w-12 mb-3 opacity-20" />
-                  <p>Ask StrategistAI about your project.</p>
-                  <p className="text-sm mt-2">
-                    Upload files (PDF, DOCX, MD) to get analysis.
-                  </p>
-                </div>
-              )}
+            {timelineIsEmpty && (
+              <div className="flex flex-col items-center justify-center h-[300px] text-center text-muted-foreground px-8">
+                <Bot className="h-12 w-12 mb-3 opacity-20" />
+                <p>Start a conversation with StrategistAI about this project.</p>
+                <Button onClick={handleNewChat} className="mt-4">
+                  <PlusCircle className="mr-2 h-4 w-4" />
+                  Start New Chat
+                </Button>
+              </div>
+            )}
 
-            {messages.map((msg) => (
-              <div
-                key={msg.id}
-                className={cn(
-                  'flex w-full gap-3',
-                  msg.sender === 'user' ? 'justify-end' : 'justify-start',
-                )}
-              >
-                {msg.sender === 'ai' && (
-                  <div className="h-8 w-8 rounded-full bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center flex-shrink-0 mt-1">
-                    <Bot className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-                  </div>
-                )}
+            {timelineEntries.map((entry) => {
+              if (entry.kind === 'review') {
+                return renderReviewEntry(entry.data);
+              }
 
+              const msg = entry.data;
+              return (
                 <div
+                  key={msg.id}
                   className={cn(
-                    'relative px-4 py-3 rounded-2xl max-w-[85%] shadow-sm text-sm leading-relaxed',
-                    msg.sender === 'user'
-                      ? 'bg-primary text-primary-foreground rounded-tr-sm'
-                      : 'bg-card border border-border text-card-foreground rounded-tl-sm',
+                    'flex w-full gap-3',
+                    msg.sender === 'user' ? 'justify-end' : 'justify-start',
                   )}
                 >
-                  {msg.uploadedFiles &&
-                    msg.uploadedFiles.length > 0 &&
-                    msg.sender === 'user' && (
-                      <div className="flex flex-wrap gap-2 mb-2">
-                        {msg.uploadedFiles.map((fileName, idx) => (
-                          <Badge
-                            key={idx}
-                            variant="secondary"
-                            className="bg-primary-foreground/10 hover:bg-primary-foreground/20 text-primary-foreground border-0"
-                          >
-                            <Paperclip className="h-3 w-3 mr-1" />
-                            {fileName}
-                          </Badge>
-                        ))}
-                      </div>
-                    )}
-
-                  <div className="whitespace-pre-wrap break-words">
-                    {renderMessageContent(
-                      msg.text.replace(/^\(Files: .*?\) /, ''),
-                    )}
-                  </div>
-
-                  {msg.sender === 'ai' && msg.insertContent && documentId && (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      className="mt-2 w-full bg-green-100 text-green-800 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-300 dark:hover:bg-green-900/50"
-                      onClick={() => handleUseThisContent(msg.insertContent!)}
-                    >
-                      <PlusCircle className="mr-2 h-4 w-4" />
-                      Use this in editor
-                    </Button>
+                  {msg.sender === 'ai' && (
+                    <div className="h-8 w-8 rounded-full bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center flex-shrink-0 mt-1">
+                      <Bot className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                    </div>
                   )}
-                  {msg.sender === 'ai' && renderSources(msg.sources)}
-                  <div className="text-[10px] mt-1 text-right opacity-70">
-                    {new Date(msg.timestamp).toLocaleTimeString([], {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </div>
-                </div>
 
-                {msg.sender === 'user' && (
-                  <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0 mt-1">
-                    <User className="h-5 w-5 text-muted-foreground" />
+                  <div
+                    className={cn(
+                      'relative px-4 py-3 rounded-2xl max-w-[85%] shadow-sm text-sm leading-relaxed',
+                      msg.sender === 'user'
+                        ? 'bg-primary text-primary-foreground rounded-tr-sm'
+                        : 'bg-card border border-border text-card-foreground rounded-tl-sm',
+                    )}
+                  >
+                    {msg.uploadedFiles &&
+                      msg.uploadedFiles.length > 0 &&
+                      msg.sender === 'user' && (
+                        <div className="flex flex-wrap gap-2 mb-2">
+                          {msg.uploadedFiles.map((fileName, idx) => (
+                            <Badge
+                              key={idx}
+                              variant="secondary"
+                              className="bg-primary-foreground/10 hover:bg-primary-foreground/20 text-primary-foreground border-0"
+                            >
+                              <Paperclip className="h-3 w-3 mr-1" />
+                              {fileName}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+
+                    <div className="whitespace-pre-wrap break-words">
+                      {renderMessageContent(
+                        msg.text.replace(/^\(Files: .*?\) /, ''),
+                      )}
+                    </div>
+
+                    {msg.sender === 'ai' && msg.insertContent && documentId && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="mt-2 w-full bg-green-100 text-green-800 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-300 dark:hover:bg-green-900/50"
+                        onClick={() => handleUseThisContent(msg.insertContent!)}
+                      >
+                        <PlusCircle className="mr-2 h-4 w-4" />
+                        Use this in editor
+                      </Button>
+                    )}
+                    {msg.sender === 'ai' && renderSources(msg.sources)}
+                    <div className="text-[10px] mt-1 text-right opacity-70">
+                      {new Date(msg.timestamp).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </div>
                   </div>
-                )}
-              </div>
-            ))}
+
+                  {msg.sender === 'user' && (
+                    <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0 mt-1">
+                      <User className="h-5 w-5 text-muted-foreground" />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
 
             {isSending && (
               <div className="flex w-full gap-3 justify-start animate-pulse">
@@ -877,7 +1005,6 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
         </ScrollArea>
       </CardContent>
 
-      {/* Attached files preview */}
       {uploadedFiles.length > 0 && (
         <div className="px-4 py-2 bg-background border-t border-border flex flex-wrap gap-2 max-h-24 overflow-y-auto">
           {uploadedFiles.map((file, index) => (
@@ -896,7 +1023,6 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
         </div>
       )}
 
-      {/* Input area — visible only when there's some active composing context */}
       {hasActiveComposer && (
         <CardFooter className="p-4 pt-2 border-t border-border bg-background">
           <form onSubmit={handleSendMessage} className="flex w-full gap-2 items-end">
@@ -905,7 +1031,6 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
               ref={fileInputRef}
               onChange={(e) => {
                 handleFileChange(e);
-                // Ensure composer is active if files are selected
                 if (e.target.files && e.target.files.length > 0) {
                   setIsNewChatActiveForComposition(true);
                 }
@@ -946,11 +1071,9 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
                 value={inputMessage}
                 onChange={(e) => {
                   setInputMessage(e.target.value);
-                  // If user starts typing, ensure composer is active
                   if (e.target.value.trim().length > 0) {
                     setIsNewChatActiveForComposition(true);
                   } else if (uploadedFiles.length === 0 && !currentChatSessionId) {
-                    // If no text, no files, and no active session, hide composer
                     setIsNewChatActiveForComposition(false);
                   }
                 }}
@@ -976,6 +1099,14 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
             </Button>
           </form>
         </CardFooter>
+      )}
+
+      {selectedReview && (
+        <ReviewDialog
+          isOpen={isReviewDialogOpen}
+          onClose={() => setIsReviewDialogOpen(false)}
+          review={selectedReview}
+        />
       )}
     </Card>
   );
