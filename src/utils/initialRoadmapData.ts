@@ -47,7 +47,7 @@ export const initialRoadmapData: InitialPhase[] = [
     steps: [
       {
         step_number: 1,
-        step_name: "Define Your Project Scope & Research Objectives",
+        step_name: "Define Your Project Scope & Research Objectives", // Corrected step name
         ...getStepData("Define Your Project Scope & Research Objectives"),
         dependencies: [],
         timeline: "Week 1",
