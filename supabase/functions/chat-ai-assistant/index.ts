@@ -241,12 +241,13 @@ serve(async (req) => {
 
     let reviewContextSection: string | null = null;
     if (documentId) {
+      // Fetch only the LATEST review to save tokens
       const { data: reviewData, error: reviewError } = await supabaseClient
         .from("ai_reviews")
         .select("id, summary, strengths, issues, suggestions, consistency_issues, readiness, readiness_reason, review_timestamp")
         .eq("document_id", documentId)
         .order("review_timestamp", { ascending: false })
-        .limit(3);
+        .limit(1);
 
       if (reviewError) {
         console.error("Failed to load AI reviews for context", reviewError);
@@ -389,7 +390,7 @@ serve(async (req) => {
       promptParts.push(`CURRENT DOCUMENT CONTEXT:\n${currentDocumentContextText}`);
     }
     if (reviewContextSection) {
-      promptParts.push(`RECENT AI REVIEWS:\n${reviewContextSection}`);
+      promptParts.push(`LATEST AI REVIEW:\n${reviewContextSection}`);
     }
     promptParts.push(`RELEVANT SEMANTIC MEMORIES:\n${formattedSemanticMemories}`);
     promptParts.push(`CURRENT STEP:\n${currentStepDefinition}`);
@@ -651,7 +652,7 @@ function rebuildPrompt(
     parts.push(`CURRENT DOCUMENT CONTEXT:\n${documentContext}`);
   }
   if (reviewContext) {
-    parts.push(`RECENT AI REVIEWS:\n${reviewContext}`);
+    parts.push(`LATEST AI REVIEW:\n${reviewContext}`);
   }
   parts.push(`RELEVANT SEMANTIC MEMORIES:\n${semanticMemories}`);
   parts.push(`CURRENT STEP:\n${stepDefinition}`);
