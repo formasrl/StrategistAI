@@ -45,6 +45,17 @@ import {
 import ReviewDialog from './ReviewDialog';
 import { AiReview } from '@/types/supabase';
 import { formatDateTime } from '@/utils/dateUtils';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+
 
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   'https://unpkg.com/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs';
@@ -119,6 +130,9 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
   const [isGeneratingReview, setIsGeneratingReview] = useState(false);
   const [isReviewDialogOpen, setIsReviewDialogOpen] = useState(false);
   const [selectedReview, setSelectedReview] = useState<AiReview | null>(null);
+  const [isConfirmingReviewDelete, setIsConfirmingReviewDelete] = useState(false);
+  const [reviewToDelete, setReviewToDelete] = useState<string | null>(null);
+
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -191,11 +205,11 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
       }
 
       let fileNames: string[] = [];
-      const fileMatch = msg.content.match(/\(Files?: ([^)]+)\)/);
+      const fileMatch = displayContent.match(/\(Files?: ([^)]+)\)/);
       if (fileMatch) {
         fileNames = fileMatch[1].split(',').map((s: string) => s.trim());
-      } else if (msg.content.match(/^\(File: .+\)/)) {
-        const legacyMatch = msg.content.match(/^\(File: (.+?)\)/);
+      } else if (displayContent.match(/^\(File: .+\)/)) {
+        const legacyMatch = displayContent.match(/^\(File: (.+?)\)/);
         if (legacyMatch) fileNames = [legacyMatch[1]];
       }
 
@@ -367,7 +381,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
             }
 
             let fileNames: string[] = [];
-            const fileMatch = newMsg.content.match(/\(Files?: ([^)]+)\)/);
+            const fileMatch = displayContent.match(/\(Files?: ([^)]+)\)/);
             if (fileMatch) {
               fileNames = fileMatch[1].split(',').map((s: string) => s.trim());
             }
@@ -539,6 +553,33 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
     } catch (error: any) {
       console.error('Failed to delete chat session:', error);
       showError(`Failed to delete chat: ${error.message}`);
+    }
+  };
+
+  const handleDeleteReview = async () => {
+    if (!reviewToDelete) return;
+
+    try {
+      const { error } = await supabase
+        .from('ai_reviews')
+        .delete()
+        .eq('id', reviewToDelete);
+
+      if (error) {
+        throw new Error(`Failed to delete review: ${error.message}`);
+      }
+
+      setReviews((prev) => prev.filter((r) => r.id !== reviewToDelete));
+      showSuccess('AI review deleted successfully.');
+      setIsConfirmingReviewDelete(false);
+      setReviewToDelete(null);
+      if (selectedReview?.id === reviewToDelete) {
+        setSelectedReview(null); // Close dialog if the deleted review was open
+        setIsReviewDialogOpen(false);
+      }
+    } catch (error: any) {
+      console.error('Error deleting review:', error);
+      showError(`Failed to delete review: ${error.message}`);
     }
   };
 
@@ -752,11 +793,33 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
         <div className="px-4 py-3 rounded-2xl bg-card border border-border text-card-foreground rounded-tl-sm w-full">
           <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
             <span>{formatDateTime(displayDate, 'MMM d, yyyy HH:mm')}</span>
-            {review.readiness && (
-              <Badge variant={review.readiness === 'ready' ? 'default' : 'secondary'}>
-                {review.readiness.replace('_', ' ').toUpperCase()}
-              </Badge>
-            )}
+            <div className="flex items-center gap-1">
+              {review.readiness && (
+                <Badge variant={review.readiness === 'ready' ? 'default' : 'secondary'}>
+                  {review.readiness.replace('_', ' ').toUpperCase()}
+                </Badge>
+              )}
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 text-destructive hover:bg-destructive/10"
+                      onClick={(e) => {
+                        e.stopPropagation(); // Prevent opening review dialog
+                        setReviewToDelete(review.id);
+                        setIsConfirmingReviewDelete(true);
+                      }}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                      <span className="sr-only">Delete Review</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">Delete Review</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
           </div>
           <p className="text-sm mt-1">
             {review.summary || 'No summary available.'}
@@ -800,6 +863,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
             variant="secondary"
             onClick={handleGenerateReview}
             disabled={isGeneratingReview || !documentId}
+            id="tour-generate-review"
           >
             {isGeneratingReview ? (
               <Loader2 className="h-4 w-4 animate-spin mr-2" />
@@ -1127,6 +1191,24 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
           review={selectedReview}
         />
       )}
+
+      <AlertDialog open={isConfirmingReviewDelete} onOpenChange={setIsConfirmingReviewDelete}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete this AI review.
+              The AI will use the next most recent review for context if available.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteReview} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete Review
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 };
