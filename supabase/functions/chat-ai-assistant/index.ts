@@ -371,7 +371,7 @@ serve(async (req) => {
       "- Keep the tone clear and professional, avoiding fluff.",
       "- Use headings and structure that map directly to the Guiding Questions or their logical groupings.",
       "- The draft should be focused and concise, not bloated: usually 3–8 short sections, not a wall of text.",
-      "- Return the draft inside a JSON block at the END of your message in this exact format:",
+      "- IMPORTANT: You MUST return the draft content inside a JSON block at the ABSOLUTE END of your message in this exact format:",
       '```json',
       '{"insert_content": "YOUR MARKDOWN CONTENT HERE"}',
       '```',
