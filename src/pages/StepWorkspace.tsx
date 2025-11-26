@@ -10,6 +10,7 @@ import { Lightbulb, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
 import DocumentEditor from './DocumentEditor';
 import { saveLastActiveStep } from '@/utils/localStorage';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { stepGuidanceLibrary } from '@/utils/stepGuidanceData';
 
 interface StepWorkspaceOutletContext {
   setAiReview: (review: AiReview | null) => void;
@@ -203,7 +204,16 @@ const StepWorkspace: React.FC = () => {
     return [];
   };
 
-  const guidingQuestions = getGuidingQuestions(step.guiding_questions);
+  const dbGuidingQuestions = getGuidingQuestions(step.guiding_questions);
+  
+  // Fallback to static library if DB content is missing
+  const staticGuidance = stepGuidanceLibrary[step.step_name];
+  const displayQuestions = dbGuidingQuestions.length > 0 
+    ? dbGuidingQuestions 
+    : (staticGuidance?.guiding_questions || []);
+    
+  const displayGoal = step.description || staticGuidance?.description || "No goal defined.";
+  const displayWhyMatters = step.why_matters || staticGuidance?.why_matters || "No context provided.";
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -233,19 +243,19 @@ const StepWorkspace: React.FC = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <h3 className="font-semibold text-foreground mb-1">Goal:</h3>
-                    <p>{step.description || "No goal defined."}</p>
+                    <p>{displayGoal}</p>
                   </div>
                   <div>
                     <h3 className="font-semibold text-foreground mb-1">Why it matters:</h3>
-                    <p>{step.why_matters || "No context provided."}</p>
+                    <p>{displayWhyMatters}</p>
                   </div>
                 </div>
                 
                 <div>
                   <h3 className="font-semibold text-foreground mb-1">Guiding Questions:</h3>
-                  {guidingQuestions.length > 0 ? (
+                  {displayQuestions.length > 0 ? (
                     <ul className="list-disc pl-5 space-y-1">
-                      {guidingQuestions.map((question, index) => (
+                      {displayQuestions.map((question, index) => (
                         <li key={index}>{question}</li>
                       ))}
                     </ul>
