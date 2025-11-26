@@ -76,8 +76,8 @@ interface AiChatbotProps {
   phaseId?: string;
   stepId?: string;
   documentId?: string;
-  setContentToInsert: (content: string | null) => void;
   contentToInsert: string | null;
+  setContentToInsert: (content: string | null) => void;
 }
 
 interface UploadedFile {
@@ -359,7 +359,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
                 const parsed = JSON.parse(jsonBlockMatch[1]);
                 if (typeof parsed.insert_content === 'string') {
                   insertContent = parsed.insert_content;
-                  displayContent = newMsg.content.replace(jsonBlockMatch[0], '').trim();
+                  displayContent = displayContent.replace(jsonBlockMatch[0], '').trim();
                 }
               } catch {
                 // ignore
@@ -774,7 +774,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
     );
   };
 
-  if (isLoadingResolution || isLoadingHistory || isLoadingReviews) {
+  if (isLoadingHistory || isLoadingReviews) { // Removed isLoadingResolution
     return (
       <Card className="flex flex-col h-full border-none shadow-none bg-transparent">
         <CardContent className="flex-1 flex flex-col justify-center items-center text-muted-foreground">
