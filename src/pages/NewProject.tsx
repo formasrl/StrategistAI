@@ -116,11 +116,13 @@ const NewProject: React.FC = () => {
           step_name: templateStep.step_name,
           description: templateStep.description || null,
           why_matters: templateStep.why_matters || null,
-          dependencies: templateStep.dependencies ? JSON.stringify(templateStep.dependencies) : '[]',
+          // Pass dependencies directly, Supabase will handle JSONB conversion
+          dependencies: templateStep.dependencies, 
           status: 'not_started',
           timeline: templateStep.timeline || null,
           order_index: templateStep.order_index,
-          guiding_questions: templateStep.guiding_questions ? JSON.stringify(templateStep.guiding_questions) : '[]',
+          // Pass guiding_questions directly, Supabase will handle JSONB conversion
+          guiding_questions: templateStep.guiding_questions, 
           expected_output: templateStep.expected_output || null,
         }));
 

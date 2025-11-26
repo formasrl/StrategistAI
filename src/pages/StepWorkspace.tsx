@@ -190,10 +190,18 @@ const StepWorkspace: React.FC = () => {
     if (Array.isArray(data)) return data.map(String);
     if (typeof data === 'string') {
       try {
-        // Handle potential double-encoded JSON string
-        const parsed = JSON.parse(data);
+        let parsed = JSON.parse(data);
+        // If the first parse results in a string, try parsing again
+        if (typeof parsed === 'string') {
+          try {
+            parsed = JSON.parse(parsed);
+          } catch {
+            // If second parse fails, treat as a single string
+            return parsed.trim().length > 0 ? [parsed] : [];
+          }
+        }
         if (Array.isArray(parsed)) return parsed.map(String);
-        // If it parses to a string (e.g. '"question"'), recurse once or return array
+        // If it parses to a string (e.g. '"question"'), treat as single item
         if (typeof parsed === 'string') return [parsed];
         return [];
       } catch {
@@ -206,7 +214,7 @@ const StepWorkspace: React.FC = () => {
 
   const dbGuidingQuestions = getGuidingQuestions(step.guiding_questions);
   
-  // Fallback to static library if DB content is missing
+  // Fallback to static library if DB content is missing or empty
   const staticGuidance = stepGuidanceLibrary[step.step_name];
   const displayQuestions = dbGuidingQuestions.length > 0 
     ? dbGuidingQuestions 
