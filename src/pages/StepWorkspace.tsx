@@ -223,6 +223,11 @@ const StepWorkspace: React.FC = () => {
   const displayGoal = step.description || staticGuidance?.description || "No goal defined.";
   const displayWhyMatters = step.why_matters || staticGuidance?.why_matters || "No context provided.";
 
+  console.log("Step Name:", step.step_name);
+  console.log("DB Guiding Questions:", dbGuidingQuestions);
+  console.log("Static Guidance for step name:", staticGuidance);
+  console.log("Display Questions (final):", displayQuestions);
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Guidance Section - Fixed at top */}
