@@ -114,6 +114,7 @@ serve(async (req) => {
   }
 
   try {
+    console.log("[chat-ai-assistant] Function started.");
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
       return respond({ error: "Unauthorized" }, 401);
@@ -138,6 +139,8 @@ serve(async (req) => {
       uploadedFiles?: UploadedFile[];
     } = body ?? {};
 
+    console.log("[chat-ai-assistant] Request body parsed:", { projectId, stepId, documentId, chatSessionId: incomingChatSessionId, stream, uploadedFiles: uploadedFiles?.length });
+
     if (!message || !projectId) {
       return respond({ error: "message and projectId are required." }, 400);
     }
@@ -156,6 +159,7 @@ serve(async (req) => {
     let currentChatSessionId = incomingChatSessionId;
 
     if (!currentChatSessionId) {
+      console.log("[chat-ai-assistant] Creating new chat session.");
       const { data: newSession, error: sessionError } = await supabaseClient
         .from("chat_sessions")
         .insert({ project_id: projectId, step_id: stepId || null, document_id: documentId || null })
@@ -167,6 +171,7 @@ serve(async (req) => {
         return respond({ error: "Failed to start chat session." }, 500);
       }
       currentChatSessionId = newSession.id;
+      console.log("[chat-ai-assistant] New chat session created:", currentChatSessionId);
     }
 
     let userMessageContent = message;
@@ -180,6 +185,7 @@ serve(async (req) => {
       role: "user",
       content: userMessageContent,
     });
+    console.log("[chat-ai-assistant] User message inserted.");
 
     const { data: projectData, error: projectError } = await supabaseClient
       .from("projects")
@@ -188,14 +194,18 @@ serve(async (req) => {
       .maybeSingle();
 
     if (projectError || !projectData) {
+      console.error("Failed to fetch project data:", projectError);
       return respond({ error: "Project not found or accessible." }, 404);
     }
+    console.log("[chat-ai-assistant] Project data fetched.");
 
     const project = projectData as ProjectRecord;
     const openAIKeyResult = await resolveOpenAIApiKey(supabaseClient, project.user_id);
     if (!openAIKeyResult.ok) {
+      console.error("Failed to resolve OpenAI API key:", openAIKeyResult.error);
       return respond({ error: openAIKeyResult.error }, openAIKeyResult.status ?? 400);
     }
+    console.log("[chat-ai-assistant] OpenAI API key resolved.");
     let currentProjectProfileText = fetchProjectProfileText(project);
 
     let currentDocumentContextText: string | null = null;
@@ -203,6 +213,7 @@ serve(async (req) => {
     let documentSummaryForSemanticSearch: string | undefined;
 
     if (documentId) {
+      console.log("[chat-ai-assistant] Fetching document details.");
       const { data: documentDetails, error: docError } = await supabaseClient
         .from("documents")
         .select("id, document_name, content, summary, key_decisions, project_id, step_id")
@@ -210,15 +221,18 @@ serve(async (req) => {
         .maybeSingle<DocumentRecord>();
 
       if (docError || !documentDetails) {
+        console.error("Failed to fetch document details:", docError);
         return respond({ error: "Document not found or accessible." }, 404);
       }
       if (documentDetails.project_id !== projectId) {
+        console.error("Document does not belong to the provided project.");
         return respond({ error: "Document does not belong to the provided project." }, 403);
       }
 
       if (!effectiveStepId) {
         effectiveStepId = documentDetails.step_id;
       } else if (documentDetails.step_id !== effectiveStepId) {
+        console.error("Document does not belong to the provided step.");
         return respond({ error: "Document does not belong to the provided step." }, 403);
       }
 
@@ -233,15 +247,17 @@ serve(async (req) => {
       );
       documentSummaryForSemanticSearch =
         typeof documentDetails.summary === "string" ? documentDetails.summary : undefined;
+      console.log("[chat-ai-assistant] Document details fetched.");
     }
 
     if (!effectiveStepId) {
+      console.error("Could not determine active step context.");
       return respond({ error: "Could not determine active step context." }, 400);
     }
 
     let reviewContextSection: string | null = null;
     if (documentId) {
-      // Fetch only the LATEST review to save tokens
+      console.log("[chat-ai-assistant] Fetching latest AI review.");
       const { data: reviewData, error: reviewError } = await supabaseClient
         .from("ai_reviews")
         .select("id, summary, strengths, issues, suggestions, consistency_issues, readiness, readiness_reason, review_timestamp")
@@ -256,6 +272,7 @@ serve(async (req) => {
       } else {
         reviewContextSection = "No AI reviews exist for this document yet.";
       }
+      console.log("[chat-ai-assistant] Latest AI review fetched.");
     }
 
     const queryTextForSemanticSearch =
@@ -263,7 +280,9 @@ serve(async (req) => {
         ? documentSummaryForSemanticSearch
         : message;
 
+    console.log("[chat-ai-assistant] Creating embedding for semantic search.");
     const queryEmbedding = await createEmbedding(openAIKeyResult.key, queryTextForSemanticSearch);
+    console.log("[chat-ai-assistant] Embedding created.");
 
     await logAiUsage(
       supabaseClient,
@@ -274,7 +293,9 @@ serve(async (req) => {
       queryTextForSemanticSearch.length,
       queryEmbedding.length
     );
+    console.log("[chat-ai-assistant] AI usage logged for embedding.");
 
+    console.log("[chat-ai-assistant] Calling RPC for semantic matches.");
     const { data: semanticMatchesData, error: rpcError } = await supabaseClient.rpc(
       "search_document_embeddings",
       {
@@ -287,6 +308,7 @@ serve(async (req) => {
     if (rpcError) {
       console.error("search_document_embeddings error", rpcError);
     }
+    console.log("[chat-ai-assistant] RPC for semantic matches completed.");
 
     const semanticMatches = (semanticMatchesData || []) as SemanticMatch[];
     let formattedSemanticMemories = formatSemanticSearchResults(semanticMatches);
@@ -302,6 +324,7 @@ serve(async (req) => {
       };
     });
 
+    console.log("[chat-ai-assistant] Fetching step details.");
     const { data: stepData, error: stepError } = await supabaseClient
       .from("steps")
       .select(
@@ -311,14 +334,18 @@ serve(async (req) => {
       .maybeSingle();
 
     if (stepError || !stepData) {
+      console.error("Failed to fetch step details:", stepError);
       return respond({ error: "Step details not found or accessible." }, 404);
     }
     if (stepData.phases?.project_id !== projectId) {
+      console.error("Step does not belong to the provided project.");
       return respond({ error: "Step does not belong to the provided project." }, 403);
     }
     const step = stepData as StepRecord;
     let currentStepDefinition = formatStepDefinition(step);
+    console.log("[chat-ai-assistant] Step details fetched.");
 
+    console.log("[chat-ai-assistant] Fetching recent chat messages.");
     const { data: recentMessagesData, error: recentMessagesError } = await supabaseClient
       .from("chat_messages")
       .select("role, content, created_at")
@@ -329,11 +356,13 @@ serve(async (req) => {
     if (recentMessagesError) {
       console.error("Failed to fetch recent chat messages:", recentMessagesError);
     }
+    console.log("[chat-ai-assistant] Recent chat messages fetched.");
 
     const { snippet: currentConversationSnippet, pruned: historyPruned, lastAiInsertContent } = formatRecentConversation(
       (recentMessagesData || []) as ChatMessage[],
       MAX_HISTORY_CHARS
     );
+    console.log("[chat-ai-assistant] Recent conversation formatted.");
 
     let uploadedFilesContent = "";
     if (uploadedFiles && uploadedFiles.length > 0) {
@@ -341,6 +370,7 @@ serve(async (req) => {
       uploadedFilesContent = uploadedFiles.map(f => 
         `--- FILE: ${f.name} ---\n${truncateToChars(f.content, charsPerFile)}`
       ).join("\n\n");
+      console.log("[chat-ai-assistant] Uploaded files content processed.");
     }
 
     const systemPrompt = [
@@ -418,6 +448,7 @@ serve(async (req) => {
     const modelTokenLimit = getModelTokenLimit(CHAT_MODEL);
 
     if (totalPromptTokens > modelTokenLimit) {
+      console.warn(`[chat-ai-assistant] Initial prompt exceeds model token limit (${totalPromptTokens} > ${modelTokenLimit}). Attempting truncation.`);
       if (uploadedFilesContent && countTokens(uploadedFilesContent) > 1000) {
         const halfLimit = Math.floor(TRUNCATION_CHAR_LIMIT / 2);
         const charsPerFile = uploadedFiles ? Math.floor(halfLimit / uploadedFiles.length) : 0;
@@ -438,19 +469,23 @@ serve(async (req) => {
           message
         );
         totalPromptTokens = countTokens(systemPrompt + finalPrompt);
+        console.log(`[chat-ai-assistant] After uploaded files truncation, new token count: ${totalPromptTokens}`);
       }
 
       if (totalPromptTokens > modelTokenLimit) {
+        console.error(`[chat-ai-assistant] Final prompt still exceeds model token limit: ${totalPromptTokens} tokens.`);
         return respond(
           {
-            error: `Your review request is too long (${totalPromptTokens} tokens). Even after truncating document content, it exceeds the model's ${modelTokenLimit} token limit. Please shorten your document content.`,
+            error: `Your request is too long (${totalPromptTokens} tokens). Even after truncating document content, it exceeds the model's ${modelTokenLimit} token limit. Please shorten your document content or message.`,
           },
           400,
         );
       }
     }
+    console.log("[chat-ai-assistant] Final prompt constructed.");
 
     if (!stream) {
+      console.log("[chat-ai-assistant] Sending non-streaming chat completion request to OpenAI.");
       const chatResponse = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -470,19 +505,21 @@ serve(async (req) => {
 
       if (!chatResponse.ok) {
         const errorText = await chatResponse.text();
-        console.error("Chat completion error (non-stream)", errorText);
+        console.error("Chat completion error (non-stream):", errorText);
         return respond({ error: "AI coach request failed." }, chatResponse.status);
       }
 
       const completion = await chatResponse.json();
       const fullReplyContent: string =
         completion?.choices?.[0]?.message?.content ?? "Sorry, I couldn't generate a response.";
+      console.log("[chat-ai-assistant] OpenAI non-streaming response received.");
 
       await supabaseClient.from("chat_messages").insert({
         chat_session_id: currentChatSessionId,
         role: "assistant",
         content: fullReplyContent,
       });
+      console.log("[chat-ai-assistant] AI message inserted into DB.");
 
       await logAiUsage(
         supabaseClient,
@@ -493,6 +530,7 @@ serve(async (req) => {
         finalPrompt.length,
         fullReplyContent.length
       );
+      console.log("[chat-ai-assistant] AI usage logged for chat.");
 
       let insertContent: string | undefined;
       const jsonBlockMatch = fullReplyContent.match(/```json\n?({[\s\S]*?})\n?```/);
@@ -516,6 +554,7 @@ serve(async (req) => {
       });
     }
 
+    console.log("[chat-ai-assistant] Sending streaming chat completion request to OpenAI.");
     const chatResponse = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -536,7 +575,7 @@ serve(async (req) => {
 
     if (!chatResponse.ok) {
       const errorText = await chatResponse.text();
-      console.error("Chat completion error", errorText);
+      console.error("Chat completion error (streaming):", errorText);
       return respond({ error: "AI coach request failed." }, chatResponse.status);
     }
 
@@ -575,12 +614,14 @@ serve(async (req) => {
               }
             }
           }
+          console.log("[chat-ai-assistant] OpenAI streaming response fully received.");
 
           await supabaseClient.from("chat_messages").insert({
             chat_session_id: currentChatSessionId,
             role: "assistant",
             content: fullReplyContent,
           });
+          console.log("[chat-ai-assistant] AI message inserted into DB (streaming).");
 
           await logAiUsage(
             supabaseClient,
@@ -591,6 +632,7 @@ serve(async (req) => {
             finalPrompt.length,
             fullReplyContent.length
           );
+          console.log("[chat-ai-assistant] AI usage logged for chat (streaming).");
 
           let insertContent: string | undefined;
           const jsonBlockMatch = fullReplyContent.match(/```json\n?({[\s\S]*?})\n?```/);
@@ -624,6 +666,7 @@ serve(async (req) => {
           );
         } finally {
           controller.close();
+          console.log("[chat-ai-assistant] Stream closed.");
         }
       },
     });
@@ -638,7 +681,7 @@ serve(async (req) => {
     });
 
   } catch (error) {
-    console.error("chat-ai-assistant error", error);
+    console.error("[chat-ai-assistant] Top-level error:", error);
     return respond({ error: "Unexpected error while generating AI response." }, 500);
   }
 });
