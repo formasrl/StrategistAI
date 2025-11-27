@@ -8,7 +8,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { 
   PanelLeft, 
-  PanelLeftClose, 
   PanelRightClose, 
   MessageSquare,
 } from "lucide-react";
@@ -21,20 +20,11 @@ interface DashboardLayoutProps {
 }
 
 const DashboardLayout: React.FC<DashboardLayoutProps> = ({ sidebar, mainContent, aiPanel }) => {
-  const leftPanelRef = useRef<ImperativePanelHandle>(null);
+  // Only ref for Right Panel is needed now as Left is an overlay (Sheet)
   const rightPanelRef = useRef<ImperativePanelHandle>(null);
   
-  // Left defaults to collapsed (true), Right defaults to expanded (false)
-  const [isLeftCollapsed, setIsLeftCollapsed] = useState(true);
+  // Right defaults to expanded (false means not collapsed)
   const [isRightCollapsed, setIsRightCollapsed] = useState(false);
-
-  const toggleLeftPanel = () => {
-    const panel = leftPanelRef.current;
-    if (panel) {
-      if (isLeftCollapsed) panel.expand();
-      else panel.collapse();
-    }
-  };
 
   const toggleRightPanel = () => {
     const panel = rightPanelRef.current;
@@ -52,46 +42,19 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ sidebar, mainContent,
         direction="horizontal"
         className="flex-1 w-full h-full"
       >
-        {/* Left Sidebar (Desktop) */}
-        <ResizablePanel 
-          ref={leftPanelRef}
-          defaultSize={0} 
-          collapsedSize={0}
-          collapsible={true}
-          minSize={15} 
-          maxSize={25} 
-          onCollapse={() => setIsLeftCollapsed(true)}
-          onExpand={() => setIsLeftCollapsed(false)}
-          className="hidden lg:block relative group"
-        >
-          <aside className="h-full p-4 bg-sidebar border-r border-border flex flex-col overflow-hidden relative">
-            {/* Collapse Button (Inside Sidebar) - Visible on hover */}
-            <div className="absolute top-2 right-2 z-20 opacity-0 group-hover:opacity-100 transition-opacity">
-               <Button 
-                variant="ghost" 
-                size="icon" 
-                className="h-6 w-6" 
-                onClick={toggleLeftPanel}
-                title="Collapse Sidebar"
-              >
-                <PanelLeftClose className="h-4 w-4 text-muted-foreground" />
-              </Button>
-            </div>
-            {sidebar}
-          </aside>
-        </ResizablePanel>
-        
-        <ResizableHandle withHandle className="hidden lg:flex" />
+        {/* 
+          LEFT SIDEBAR REMOVED from ResizablePanelGroup.
+          It is now handled purely by the floating Sheet trigger below.
+        */}
 
         {/* Central Content */}
         <ResizablePanel defaultSize={75} minSize={40} className="relative flex flex-col">
           
-          {/* Left Expand/Toggle Button (Floating) - Visible only when sidebar is collapsed (or on mobile) */}
-          <div className={`absolute top-3 left-3 z-50 flex gap-2 transition-all duration-300 ${!isLeftCollapsed ? 'lg:hidden' : ''}`}>
-             {/* Mobile Sheet Trigger */}
+          {/* Left Toggle Button (Floating) - Always visible, triggers Overlay */}
+          <div className="absolute top-3 left-3 z-50 flex gap-2">
             <Sheet>
               <SheetTrigger asChild>
-                <Button variant="outline" size="icon" className="h-8 w-8 lg:hidden bg-background/80 backdrop-blur-sm shadow-sm" title="Open Menu">
+                <Button variant="outline" size="icon" className="h-8 w-8 bg-background/80 backdrop-blur-sm shadow-sm" title="Open Menu">
                   <PanelLeft className="h-4 w-4" />
                 </Button>
               </SheetTrigger>
@@ -101,17 +64,6 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ sidebar, mainContent,
                 </aside>
               </SheetContent>
             </Sheet>
-
-            {/* Desktop Expand Button */}
-            <Button 
-              variant="outline" 
-              size="icon" 
-              className={`h-8 w-8 hidden lg:flex bg-background/80 backdrop-blur-sm shadow-sm`}
-              onClick={toggleLeftPanel}
-              title="Expand Sidebar"
-            >
-              <PanelLeft className="h-4 w-4" />
-            </Button>
           </div>
 
           {/* Right Expand/Toggle Button (Floating) - Visible only when sidebar is collapsed (or on mobile) */}
@@ -127,7 +79,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ sidebar, mainContent,
               <MessageSquare className="h-4 w-4" />
             </Button>
 
-            {/* Mobile Sheet Trigger */}
+            {/* Mobile Sheet Trigger for AI Panel */}
             <Sheet>
               <SheetTrigger asChild>
                 <Button variant="outline" size="icon" className="h-8 w-8 lg:hidden bg-background/80 backdrop-blur-sm shadow-sm" title="Open AI Chat">
