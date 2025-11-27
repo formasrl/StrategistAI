@@ -330,7 +330,7 @@ serve(async (req) => {
       console.error("Failed to fetch recent chat messages:", recentMessagesError);
     }
 
-    const { snippet: currentConversationSnippet, pruned: historyPruned } = formatRecentConversation(
+    const { snippet: currentConversationSnippet, pruned: historyPruned, lastAiInsertContent } = formatRecentConversation(
       (recentMessagesData || []) as ChatMessage[],
       MAX_HISTORY_CHARS
     );
@@ -351,6 +351,7 @@ serve(async (req) => {
       "- You have access to the 'CURRENT STEP' details, including its Goal, Guiding Questions, and Expected Output.",
       "- You have access to the 'PROJECT PROFILE', 'RECENT AI REVIEWS', and 'RELEVANT SEMANTIC MEMORIES'.",
       "- Treat the Guiding Questions as the blueprint for the document.",
+      "- You might also have access to 'PREVIOUS DRAFT CONTENT' if the user is iterating on a generated draft.", // Added
       "",
       "MODES OF OPERATION:",
       "1) ADVISORY / Q&A MODE:",
@@ -368,6 +369,8 @@ serve(async (req) => {
       "- ONLY AFTER the user has provided enough detail to reasonably address all Guiding Questions should you generate a full draft.",
       "",
       "WHEN GENERATING THE DRAFT:",
+      "- If 'PREVIOUS DRAFT CONTENT' is provided, use it as the base and apply the user's new instructions as modifications or additions.", // Added
+      "- If 'PREVIOUS DRAFT CONTENT' is NOT provided, generate the draft from scratch based on the current context.", // Added
       "- Keep the tone clear and professional, avoiding fluff.",
       "- Use headings and structure that map directly to the Guiding Questions or their logical groupings.",
       "- The draft should be focused and concise, not bloated: usually 3–8 short sections, not a wall of text.",
@@ -404,6 +407,9 @@ serve(async (req) => {
     if (uploadedFilesContent) {
       promptParts.push(`UPLOADED FILES CONTENT:\n${uploadedFilesContent}`);
     }
+    if (lastAiInsertContent) { // Added previous draft content
+      promptParts.push(`PREVIOUS DRAFT CONTENT:\n${lastAiInsertContent}`);
+    }
     promptParts.push(`USER QUESTION:\n${message}`);
 
     let finalPrompt = promptParts.join("\n\n");
@@ -428,6 +434,7 @@ serve(async (req) => {
           currentConversationSnippet,
           currentDocumentContentExcerpt,
           uploadedFilesContent,
+          lastAiInsertContent, // Pass to rebuildPrompt
           message
         );
         totalPromptTokens = countTokens(systemPrompt + finalPrompt);
@@ -645,6 +652,7 @@ function rebuildPrompt(
   conversationSnippet: string | null,
   documentExcerpt: string | null,
   uploadedFilesContent: string | null,
+  previousDraftContent: string | null, // Added
   userQuestion: string
 ): string {
   const parts: string[] = [];
@@ -665,6 +673,9 @@ function rebuildPrompt(
   }
   if (uploadedFilesContent) {
     parts.push(`UPLOADED FILES CONTENT:\n${uploadedFilesContent}`);
+  }
+  if (previousDraftContent) { // Added previous draft content
+    parts.push(`PREVIOUS DRAFT CONTENT:\n${previousDraftContent}`);
   }
   parts.push(`USER QUESTION:\n${userQuestion}`);
   return parts.join("\n\n");
@@ -847,28 +858,38 @@ function buildDraftSegment(content: string, summary?: string): string | null {
 function formatRecentConversation(
   messages: ChatMessage[],
   maxChars: number
-): { snippet: string | null; pruned: boolean } {
-  if (!messages.length) return { snippet: null, pruned: false };
+): { snippet: string | null; pruned: boolean; lastAiInsertContent: string | null } {
+  if (!messages.length) return { snippet: null, pruned: false, lastAiInsertContent: null };
 
   const formattedLines: string[] = [];
   let currentLength = 0;
   let historyPruned = false;
+  let lastAiInsertContent: string | null = null;
 
+  // Iterate from most recent to oldest
   for (let i = messages.length - 1; i >= 0; i--) {
     const entry = messages[i];
     const speaker = entry.role === "assistant" ? "Assistant" : "User";
     const line = `${speaker}: ${entry.content}`;
+
+    // Check for last AI insert content from the assistant's message
+    if (entry.role === "assistant" && lastAiInsertContent === null) {
+      const { insertContent } = extractInsertContent(entry.content);
+      if (insertContent) {
+        lastAiInsertContent = insertContent;
+      }
+    }
 
     if (currentLength + line.length + (formattedLines.length > 0 ? "\n".length : 0) > maxChars) {
       historyPruned = true;
       break;
     }
 
-    formattedLines.unshift(line);
+    formattedLines.unshift(line); // Add to the beginning to maintain chronological order
     currentLength += line.length + (formattedLines.length > 1 ? "\n".length : 0);
   }
 
-  return { snippet: formattedLines.join("\n"), pruned: historyPruned };
+  return { snippet: formattedLines.join("\n"), pruned: historyPruned, lastAiInsertContent };
 }
 
 function sanitizeLine(value: string | null, fallback: string): string {
