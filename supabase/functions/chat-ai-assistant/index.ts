@@ -12,6 +12,29 @@ function stripHtmlTags(htmlContent: string | null | undefined): string {
   return htmlContent.replace(/<[^>]*>/g, " ").trim();
 }
 
+// Helper: Extract JSON content from message
+function extractInsertContent(content: string): { displayContent: string; insertContent?: string } {
+  if (!content) return { displayContent: '' };
+  
+  const jsonBlockMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
+  
+  if (jsonBlockMatch && jsonBlockMatch[1]) {
+    try {
+      const parsed = JSON.parse(jsonBlockMatch[1]);
+      if (typeof parsed.insert_content === 'string') {
+        return {
+          insertContent: parsed.insert_content,
+          displayContent: content.replace(jsonBlockMatch[0], '').trim()
+        };
+      }
+    } catch (e) {
+      console.error('Failed to parse JSON block in chat message:', e);
+    }
+  }
+  
+  return { displayContent: content };
+}
+
 const CHAT_MODEL = Deno.env.get("STRATEGIST_CHAT_MODEL") ?? "gpt-4o-mini";
 const EMBEDDING_MODEL = Deno.env.get("STRATEGIST_EMBEDDING_MODEL") ?? "text-embedding-3-small";
 
@@ -682,7 +705,7 @@ serve(async (req) => {
 
   } catch (error) {
     console.error("[chat-ai-assistant] Top-level error:", error);
-    return respond({ error: "Unexpected error while generating AI response." }, 500);
+    return respond({ error: `Unexpected error: ${(error as Error).message}` }, 500);
   }
 });
 
