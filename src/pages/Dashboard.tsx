@@ -21,7 +21,6 @@ type DashboardOutletContext = {
   refreshProjects?: () => void;
   setContentToInsert?: (content: string | null) => void;
   contentToInsert?: string | null;
-  // handleAttemptInsertContent is now handled directly by setContentToInsert
 };
 
 const Dashboard = () => {
@@ -57,7 +56,11 @@ const Dashboard = () => {
     if (!isLoading && !session) {
       navigate('/login');
     } else if (!isLoading && session) {
-      if (!projectId && !stepId && !documentId) {
+      // Check if we are strictly at the dashboard root path.
+      // This prevents the redirect logic from hijacking routes like /dashboard/settings or /dashboard/profile
+      const isDashboardRoot = location.pathname === '/dashboard' || location.pathname === '/dashboard/';
+
+      if (isDashboardRoot && !projectId && !stepId && !documentId) {
         const lastActive = getLastActiveStep();
         if (lastActive) {
           if (lastActive.documentId) {
@@ -69,27 +72,23 @@ const Dashboard = () => {
           }
           return;
         }
-      }
 
-      const checkProjects = async () => {
-        const { data, error } = await supabase
-          .from('projects')
-          .select('id')
-          .eq('user_id', session.user.id)
-          .limit(1);
+        const checkProjects = async () => {
+          const { data, error } = await supabase
+            .from('projects')
+            .select('id')
+            .eq('user_id', session.user.id)
+            .limit(1);
 
-        if (error || !data || data.length === 0) {
-          if (!projectId && !stepId && !documentId) {
-            navigate('/project/new');
+          if (error || !data || data.length === 0) {
+             navigate('/project/new');
           }
-        }
-      };
+        };
 
-      if (!projectId && !stepId && !documentId) {
         checkProjects();
       }
     }
-  }, [session, isLoading, navigate, projectId, stepId, documentId]);
+  }, [session, isLoading, navigate, projectId, stepId, documentId, location.pathname]);
 
 
   useEffect(() => {
@@ -205,9 +204,8 @@ const Dashboard = () => {
     setDocumentIdForAiPanel: setAiPanelDocumentId,
     setStepIdForAiPanel: setAiPanelStepId,
     refreshProjects,
-    setContentToInsert, // Pass setContentToInsert directly
+    setContentToInsert,
     contentToInsert,
-    // handleAttemptInsertContent is no longer needed here, DocumentEditor will handle it
   };
 
   const shouldRunTour = !onboardingTourCompleted && location.pathname.startsWith('/dashboard');
@@ -254,7 +252,6 @@ const Dashboard = () => {
             documentId={aiPanelDocumentId}
             contentToInsert={contentToInsert}
             setContentToInsert={setContentToInsert}
-            // handleAttemptInsertContent is no longer passed down from Dashboard
           />
         }
       />
