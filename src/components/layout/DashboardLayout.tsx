@@ -11,9 +11,6 @@ import {
   PanelLeftClose, 
   PanelRightClose, 
   MessageSquare,
-  PanelRightOpen,
-  ChevronLeft,
-  ChevronRight
 } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 
@@ -27,6 +24,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ sidebar, mainContent,
   const leftPanelRef = useRef<ImperativePanelHandle>(null);
   const rightPanelRef = useRef<ImperativePanelHandle>(null);
   
+  // Left defaults to collapsed (true), Right defaults to expanded (false)
   const [isLeftCollapsed, setIsLeftCollapsed] = useState(true);
   const [isRightCollapsed, setIsRightCollapsed] = useState(false);
 
@@ -67,7 +65,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ sidebar, mainContent,
           className="hidden lg:block relative group"
         >
           <aside className="h-full p-4 bg-sidebar border-r border-border flex flex-col overflow-hidden relative">
-            {/* Collapse Button (Inside Sidebar) */}
+            {/* Collapse Button (Inside Sidebar) - Visible on hover */}
             <div className="absolute top-2 right-2 z-20 opacity-0 group-hover:opacity-100 transition-opacity">
                <Button 
                 variant="ghost" 
@@ -88,7 +86,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ sidebar, mainContent,
         {/* Central Content */}
         <ResizablePanel defaultSize={75} minSize={40} className="relative flex flex-col">
           
-          {/* Left Expand/Toggle Button (Floating) */}
+          {/* Left Expand/Toggle Button (Floating) - Visible only when sidebar is collapsed (or on mobile) */}
           <div className={`absolute top-3 left-3 z-50 flex gap-2 transition-all duration-300 ${!isLeftCollapsed ? 'lg:hidden' : ''}`}>
              {/* Mobile Sheet Trigger */}
             <Sheet>
@@ -116,7 +114,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ sidebar, mainContent,
             </Button>
           </div>
 
-          {/* Right Expand/Toggle Button (Floating) */}
+          {/* Right Expand/Toggle Button (Floating) - Visible only when sidebar is collapsed (or on mobile) */}
           <div className={`absolute top-3 right-3 z-50 flex gap-2 transition-all duration-300 ${!isRightCollapsed ? 'lg:hidden' : ''}`}>
              {/* Desktop Expand Button */}
              <Button 
@@ -164,7 +162,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ sidebar, mainContent,
           className="hidden lg:block relative group"
         >
           <aside className="h-full p-4 bg-sidebar border-l border-border flex flex-col relative">
-             {/* Collapse Button (Inside Sidebar) */}
+             {/* Collapse Button (Inside Sidebar) - Visible on hover */}
              <div className="absolute top-2 left-2 z-20 opacity-0 group-hover:opacity-100 transition-opacity">
                <Button 
                 variant="ghost" 
