@@ -462,7 +462,10 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
       );
 
       if (!response.ok) {
-        throw new Error('Failed to fetch AI response');
+        // Log the detailed error message from the response body
+        const errorData = await response.json();
+        console.error('AI Function Error:', errorData.error || 'Unknown error');
+        throw new Error(errorData.error || 'Failed to fetch AI response');
       }
 
       const data = await response.json();
@@ -498,7 +501,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
       
     } catch (err: any) {
       console.error('Chat Error:', err);
-      showError('Failed to get response. Please try again.');
+      showError(err.message || 'Failed to get response. Please try again.');
     } finally {
       setIsSending(false);
     }
