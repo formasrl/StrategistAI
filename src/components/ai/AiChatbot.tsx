@@ -56,7 +56,6 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 
-
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   'https://unpkg.com/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs';
 
@@ -88,7 +87,6 @@ interface AiChatbotProps {
   stepId?: string;
   documentId?: string;
   setContentToInsert: (content: string | null) => void;
-  // contentToInsert is no longer needed as a prop here
 }
 
 interface UploadedFile {
@@ -112,15 +110,11 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
   const [inputMessage, setInputMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
-  const [currentChatSessionId, setCurrentChatSessionId] = useState<string | undefined>(
-    undefined,
-  );
+  const [currentChatSessionId, setCurrentChatSessionId] = useState<string | undefined>();
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
 
   const [availableChatSessions, setAvailableChatSessions] = useState<ChatSession[]>([]);
-  const [selectedChatSessionId, setSelectedChatSessionId] = useState<string | undefined>(
-    undefined,
-  );
+  const [selectedChatSessionId, setSelectedChatSessionId] = useState<string | undefined>();
   const [isLoadingSessions, setIsLoadingSessions] = useState(false);
   const [isHistoryCollapsed, setIsHistoryCollapsed] = useState(true);
   const [isNewChatActiveForComposition, setIsNewChatActiveForComposition] = useState(false);
@@ -133,7 +127,6 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
   const [isConfirmingReviewDelete, setIsConfirmingReviewDelete] = useState(false);
   const [reviewToDelete, setReviewToDelete] = useState<string | null>(null);
 
-
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -145,17 +138,9 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
     }));
 
     const reviewEntries: TimelineEntry[] = reviews.map((review) => {
-      // Safely handle timestamp. Supabase types might differ from runtime.
-      // Force a string or use current time to avoid RangeError on toISOString.
       const reviewAny = review as any;
       const rawTime = review.review_timestamp || reviewAny.created_at;
-      let timestamp: string;
-      
-      if (rawTime) {
-        timestamp = rawTime;
-      } else {
-        timestamp = new Date().toISOString();
-      }
+      const timestamp = rawTime || new Date().toISOString();
 
       return {
         kind: 'review',
@@ -191,7 +176,8 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
       let insertContent: string | undefined;
       let displayContent = msg.content || '';
 
-      const jsonBlockMatch = displayContent.match(/```json\n?({[\s\S]*?})\n?```/);
+      // Extract ```json { "insert_content": "..." } ``` block if present
+      const jsonBlockMatch = displayContent.match(/```json\s*([\s\S]*?)```/);
       if (jsonBlockMatch && jsonBlockMatch[1]) {
         try {
           const parsed = JSON.parse(jsonBlockMatch[1]);
@@ -225,6 +211,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
     });
   }, []);
 
+  // Load sessions and initial history
   useEffect(() => {
     let isMounted = true;
 
@@ -300,6 +287,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
     };
   }, [projectId, stepId, documentId, fetchMessagesForSession]);
 
+  // Load reviews for this document
   useEffect(() => {
     if (!documentId) {
       setReviews([]);
@@ -347,6 +335,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
     [selectedChatSessionId, projectId, stepId, documentId, fetchMessagesForSession],
   );
 
+  // Realtime insertion of new messages
   useEffect(() => {
     if (!currentChatSessionId) return;
 
@@ -367,13 +356,14 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
 
             let insertContent: string | undefined;
             let displayContent = newMsg.content;
-            const jsonBlockMatch = newMsg.content.match(/```json\n?({[\s\S]*?})\n?```/);
+
+            const jsonBlockMatch = displayContent.match(/```json\s*([\s\S]*?)```/);
             if (jsonBlockMatch && jsonBlockMatch[1]) {
               try {
                 const parsed = JSON.parse(jsonBlockMatch[1]);
                 if (typeof parsed.insert_content === 'string') {
                   insertContent = parsed.insert_content;
-                  displayContent = newMsg.content.replace(jsonBlockMatch[0], '').trim();
+                  displayContent = displayContent.replace(jsonBlockMatch[0], '').trim();
                 }
               } catch {
                 // ignore
@@ -574,7 +564,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
       setIsConfirmingReviewDelete(false);
       setReviewToDelete(null);
       if (selectedReview?.id === reviewToDelete) {
-        setSelectedReview(null); // Close dialog if the deleted review was open
+        setSelectedReview(null);
         setIsReviewDialogOpen(false);
       }
     } catch (error: any) {
@@ -730,7 +720,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
       showError('Please navigate to a document to insert content.');
       return;
     }
-    setContentToInsert(content); // Directly call setContentToInsert from props
+    setContentToInsert(content);
     showSuccess('Content sent to editor. Check the document editor panel!');
   };
 
@@ -745,7 +735,10 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
   };
 
   const hasActiveComposer =
-    !!currentChatSessionId || inputMessage.trim().length > 0 || uploadedFiles.length > 0 || isNewChatActiveForComposition;
+    !!currentChatSessionId ||
+    inputMessage.trim().length > 0 ||
+    uploadedFiles.length > 0 ||
+    isNewChatActiveForComposition;
 
   const handleOpenReview = (review: AiReview) => {
     setSelectedReview(review);
@@ -781,7 +774,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
   const renderReviewEntry = (review: AiReview) => {
     const reviewAny = review as any;
     const displayDate = review.review_timestamp || reviewAny.created_at || new Date().toISOString();
-    
+
     return (
       <div
         key={review.id}
@@ -807,7 +800,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
                       size="icon"
                       className="h-6 w-6 text-destructive hover:bg-destructive/10"
                       onClick={(e) => {
-                        e.stopPropagation(); // Prevent opening review dialog
+                        e.stopPropagation();
                         setReviewToDelete(review.id);
                         setIsConfirmingReviewDelete(true);
                       }}
@@ -1055,7 +1048,9 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
                         Use this in editor
                       </Button>
                     )}
+
                     {msg.sender === 'ai' && renderSources(msg.sources)}
+
                     <div className="text-[10px] mt-1 text-right opacity-70">
                       {new Date(msg.timestamp).toLocaleTimeString([], {
                         hour: '2-digit',
