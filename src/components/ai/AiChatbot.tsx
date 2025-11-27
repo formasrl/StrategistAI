@@ -98,21 +98,32 @@ type TimelineEntry =
   | { kind: 'message'; timestamp: string; data: ChatMessage }
   | { kind: 'review'; timestamp: string; data: AiReview };
 
-// Helper function to extract JSON content from message
+// Robust helper function to extract JSON content from message
+// Now handles loose whitespace around the JSON block identifiers
 const extractInsertContent = (content: string): { displayContent: string; insertContent?: string } => {
-  // More robust regex that allows for whitespace/newlines around the JSON block
+  if (!content) return { displayContent: '' };
+  
+  // Regex: 
+  // ```json : matches start marker
+  // \s*     : matches any whitespace (newlines, spaces) before content
+  // ([\s\S]*?) : captures content non-greedily (group 1)
+  // \s*     : matches any whitespace after content
+  // ```     : matches end marker
   const jsonBlockMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
   
   if (jsonBlockMatch && jsonBlockMatch[1]) {
     try {
+      // Try to parse the captured group
       const parsed = JSON.parse(jsonBlockMatch[1]);
       if (typeof parsed.insert_content === 'string') {
+        // If successful, return content stripped of the JSON block
         return {
           insertContent: parsed.insert_content,
           displayContent: content.replace(jsonBlockMatch[0], '').trim()
         };
       }
     } catch (e) {
+      // If parsing fails, just return original content
       console.error('Failed to parse JSON block in chat message:', e);
     }
   }
@@ -196,6 +207,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
 
     return messagesData.map((msg: any) => {
       const rawContent = msg.content || '';
+      // Use the robust helper function
       const { displayContent, insertContent } = extractInsertContent(rawContent);
 
       let fileNames: string[] = [];
@@ -362,7 +374,9 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
           setMessages((prev) => {
             if (prev.some((m) => m.id === newMsg.id)) return prev;
 
-            const { displayContent, insertContent } = extractInsertContent(newMsg.content || '');
+            const rawContent = newMsg.content || '';
+            // Use the robust helper function here too
+            const { displayContent, insertContent } = extractInsertContent(rawContent);
 
             let fileNames: string[] = [];
             const fileMatch = displayContent.match(/\(Files?: ([^)]+)\)/);
@@ -481,12 +495,6 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
           insertContent: data.insertContent, // Backend parsed it?
         },
       ]);
-      
-      // Even if backend returns insertContent, we double check in the renderer via extractInsertContent 
-      // for consistency if data.reply still has the block.
-      // Actually, fetchMessagesForSession handles re-parsing from DB.
-      // For the immediate local update, if `data.insertContent` is set by backend, we use it.
-      // If not, the component will re-render when `postgres_changes` fires (which calls the extract logic).
       
     } catch (err: any) {
       console.error('Chat Error:', err);
