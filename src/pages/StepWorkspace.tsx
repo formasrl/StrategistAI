@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Step, AiReview } from '@/types/supabase';
@@ -6,7 +6,7 @@ import { showError } from '@/utils/toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
-import { Lightbulb, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
+import { Lightbulb, Loader2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight } from 'lucide-react';
 import DocumentEditor from './DocumentEditor';
 import { saveLastActiveStep } from '@/utils/localStorage';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -17,25 +17,18 @@ interface StepWorkspaceOutletContext {
   setIsAiReviewLoading: (isLoading: boolean) => void;
   setDocumentIdForAiPanel: (docId: string | undefined) => void;
   setStepIdForAiPanel: (stepId: string | undefined) => void;
-  // handleAttemptInsertContent is no longer passed directly through context
 }
 
 const StepWorkspace: React.FC = () => {
-  // Handle both route patterns: /step/:stepId and /document/:documentId
   const { projectId, stepId: paramStepId, documentId: paramDocumentId } = useParams<{ projectId: string; stepId?: string; documentId?: string }>();
   const navigate = useNavigate();
   
   const [step, setStep] = useState<Step | null>(null);
   const [isLoadingStep, setIsLoadingStep] = useState(true);
-  
-  // Resolved IDs
   const [resolvedStepId, setResolvedStepId] = useState<string | undefined>(paramStepId);
   const [activeDocumentId, setActiveDocumentId] = useState<string | undefined>(paramDocumentId);
-  
   const [isLoadingResolution, setIsLoadingResolution] = useState(true);
   const [isGuidanceOpen, setIsGuidanceOpen] = useState(true);
-
-  // New states for phase steps navigation
   const [phaseSteps, setPhaseSteps] = useState<Step[]>([]);
   const [isLoadingPhaseSteps, setIsLoadingPhaseSteps] = useState(false);
 
@@ -44,10 +37,8 @@ const StepWorkspace: React.FC = () => {
     setIsAiReviewLoading,
     setDocumentIdForAiPanel,
     setStepIdForAiPanel,
-    // handleAttemptInsertContent is no longer destructured here
   } = useOutletContext<StepWorkspaceOutletContext>();
 
-  // 1. Resolution Effect
   useEffect(() => {
     const resolveContext = async () => {
       setIsLoadingResolution(true);
@@ -94,7 +85,6 @@ const StepWorkspace: React.FC = () => {
     resolveContext();
   }, [paramStepId, paramDocumentId]);
 
-  // 2. Fetch Step Data Effect
   useEffect(() => {
     const fetchStepDetails = async () => {
       if (!resolvedStepId) {
@@ -105,7 +95,7 @@ const StepWorkspace: React.FC = () => {
       setIsLoadingStep(true);
       const { data, error } = await supabase
         .from('steps')
-        .select('*, phases(id, phase_name, phase_number)') // Select phase details too
+        .select('*, phases(id, phase_name, phase_number)')
         .eq('id', resolvedStepId)
         .single();
 
@@ -121,7 +111,6 @@ const StepWorkspace: React.FC = () => {
     fetchStepDetails();
   }, [resolvedStepId, isLoadingResolution]);
 
-  // NEW EFFECT: Fetch all steps for the current phase
   useEffect(() => {
     const fetchPhaseSteps = async () => {
       if (!step?.phase_id) {
@@ -146,9 +135,8 @@ const StepWorkspace: React.FC = () => {
     };
 
     fetchPhaseSteps();
-  }, [step?.phase_id]); // Re-run when the current step's phase_id changes
+  }, [step?.phase_id]);
 
-  // 3. Handle Creation of Default Document if needed
   useEffect(() => {
     const createDefaultDocIfNeeded = async () => {
       if (!isLoadingResolution && !isLoadingStep && step && !activeDocumentId && projectId && resolvedStepId) {
@@ -178,7 +166,6 @@ const StepWorkspace: React.FC = () => {
     createDefaultDocIfNeeded();
   }, [isLoadingResolution, isLoadingStep, step, activeDocumentId, projectId, resolvedStepId]);
 
-  // Sync with Sidebar/AI Panel Context
   useEffect(() => {
     if (resolvedStepId) setStepIdForAiPanel(resolvedStepId);
     if (activeDocumentId) setDocumentIdForAiPanel(activeDocumentId);
@@ -189,14 +176,12 @@ const StepWorkspace: React.FC = () => {
     };
   }, [resolvedStepId, activeDocumentId, setStepIdForAiPanel, setDocumentIdForAiPanel]);
 
-  // Save to Local Storage
   useEffect(() => {
     if (projectId && resolvedStepId) {
       saveLastActiveStep(projectId, resolvedStepId, activeDocumentId);
     }
   }, [projectId, resolvedStepId, activeDocumentId]);
 
-  // Calculate next/previous step IDs
   const { prevStep, nextStep } = useMemo(() => {
     if (!resolvedStepId || !phaseSteps.length) {
       return { prevStep: null, nextStep: null };
@@ -215,7 +200,7 @@ const StepWorkspace: React.FC = () => {
     }
   };
 
-  if (isLoadingResolution || isLoadingStep || isLoadingPhaseSteps) { // Include new loading state
+  if (isLoadingResolution || isLoadingStep || isLoadingPhaseSteps) {
     return (
       <div className="flex flex-col h-full space-y-4">
         <Skeleton className="h-24 w-full" />
@@ -235,28 +220,23 @@ const StepWorkspace: React.FC = () => {
     );
   }
 
-  // Robust parsing for guiding questions
   const getGuidingQuestions = (data: any): string[] => {
     if (!data) return [];
     if (Array.isArray(data)) return data.map(String);
     if (typeof data === 'string') {
       try {
         let parsed = JSON.parse(data);
-        // If the first parse results in a string, try parsing again
         if (typeof parsed === 'string') {
           try {
             parsed = JSON.parse(parsed);
           } catch {
-            // If second parse fails, treat as a single string
             return parsed.trim().length > 0 ? [parsed] : [];
           }
         }
         if (Array.isArray(parsed)) return parsed.map(String);
-        // If it parses to a string (e.g. '"question"'), treat as single item
         if (typeof parsed === 'string') return [parsed];
         return [];
       } catch {
-        // If not JSON, treat the string itself as a single question if not empty
         return data.trim().length > 0 ? [data] : [];
       }
     }
@@ -264,8 +244,6 @@ const StepWorkspace: React.FC = () => {
   };
 
   const dbGuidingQuestions = getGuidingQuestions(step.guiding_questions);
-  
-  // Fallback to static library if DB content is missing or empty
   const staticGuidance = stepGuidanceLibrary[step.step_name];
   const displayQuestions = dbGuidingQuestions.length > 0 
     ? dbGuidingQuestions 
@@ -274,48 +252,50 @@ const StepWorkspace: React.FC = () => {
   const displayGoal = step.description || staticGuidance?.description || "No goal defined.";
   const displayWhyMatters = step.why_matters || staticGuidance?.why_matters || "No context provided.";
 
-  console.log("Step Name:", step.step_name);
-  console.log("DB Guiding Questions:", dbGuidingQuestions);
-  console.log("Static Guidance for step name:", staticGuidance);
-  console.log("Display Questions (final):", displayQuestions);
-
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Navigation Buttons */}
-      <div className="flex justify-between items-center mb-4 shrink-0">
-        <Button
-          variant="outline"
-          onClick={() => prevStep && handleNavigateToStep(prevStep.id)}
-          disabled={!prevStep}
-        >
-          Previous Step
-        </Button>
-        <Button
-          variant="outline"
-          onClick={() => nextStep && handleNavigateToStep(nextStep.id)}
-          disabled={!nextStep}
-        >
-          Next Step
-        </Button>
-      </div>
-
-      {/* Guidance Section - Fixed at top */}
       <div className="shrink-0 pb-4 z-10 bg-background">
         <Collapsible open={isGuidanceOpen} onOpenChange={setIsGuidanceOpen}>
           <Card className="w-full border-l-4 border-l-blue-500 shadow-sm">
-            <CardHeader className="flex flex-row items-center justify-between p-4 pb-2 space-y-0">
-              <div className="flex items-center space-x-2">
-                <Lightbulb className="h-5 w-5 text-blue-500" />
-                <CardTitle className="text-lg font-bold">Guidance: {step.step_name}</CardTitle>
+            <CardHeader className="flex flex-col md:flex-row md:items-center justify-between p-3 gap-2">
+              <div className="flex items-center gap-2 overflow-hidden">
+                <div className="flex shrink-0 gap-1">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => prevStep && handleNavigateToStep(prevStep.id)}
+                    disabled={!prevStep}
+                    title="Previous Step"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => nextStep && handleNavigateToStep(nextStep.id)}
+                    disabled={!nextStep}
+                    title="Next Step"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="flex items-center gap-2 min-w-0">
+                  <Lightbulb className="h-5 w-5 text-blue-500 shrink-0" />
+                  <CardTitle className="text-base md:text-lg font-bold truncate">
+                    Guidance: {step.step_name}
+                  </CardTitle>
+                </div>
               </div>
+              
               <CollapsibleTrigger asChild>
-                <Button variant="ghost" size="sm" className="w-9 p-0">
+                <Button variant="ghost" size="sm" className="w-full md:w-auto h-8">
                   {isGuidanceOpen ? (
-                    <ChevronUp className="h-4 w-4" />
+                    <>Hide Details <ChevronUp className="h-4 w-4 ml-2" /></>
                   ) : (
-                    <ChevronDown className="h-4 w-4" />
+                    <>Show Details <ChevronDown className="h-4 w-4 ml-2" /></>
                   )}
-                  <span className="sr-only">Toggle Guidance</span>
                 </Button>
               </CollapsibleTrigger>
             </CardHeader>
@@ -351,7 +331,6 @@ const StepWorkspace: React.FC = () => {
         </Collapsible>
       </div>
 
-      {/* Editor Section - Scrollable Area */}
       <div className="flex-1 min-h-0 overflow-y-auto pr-2 pb-20">
         {activeDocumentId ? (
           <DocumentEditor
