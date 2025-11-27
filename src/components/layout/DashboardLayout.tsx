@@ -6,7 +6,15 @@ import {
   ImperativePanelHandle,
 } from "@/components/ui/resizable";
 import { Button } from "@/components/ui/button";
-import { PanelLeft, PanelRight, MessageSquare } from "lucide-react";
+import { 
+  PanelLeft, 
+  PanelLeftClose, 
+  PanelRightClose, 
+  MessageSquare,
+  PanelRightOpen,
+  ChevronLeft,
+  ChevronRight
+} from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 
 interface DashboardLayoutProps {
@@ -19,9 +27,8 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ sidebar, mainContent,
   const leftPanelRef = useRef<ImperativePanelHandle>(null);
   const rightPanelRef = useRef<ImperativePanelHandle>(null);
   
-  // Track collapsed state locally since the ref method might not be available or reliable
-  const [isLeftCollapsed, setIsLeftCollapsed] = useState(true); // Start collapsed (defaultSize=0)
-  const [isRightCollapsed, setIsRightCollapsed] = useState(false); // Start expanded (defaultSize=25)
+  const [isLeftCollapsed, setIsLeftCollapsed] = useState(true);
+  const [isRightCollapsed, setIsRightCollapsed] = useState(false);
 
   const toggleLeftPanel = () => {
     const panel = leftPanelRef.current;
@@ -40,75 +47,14 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ sidebar, mainContent,
   };
 
   return (
-    <div className="h-screen w-full flex flex-col rounded-lg border bg-background text-foreground">
-      {/* Header / Toggle Bar */}
-      <div className="flex items-center justify-between p-2 border-b border-border bg-background shrink-0">
-        <div className="flex items-center gap-2">
-          {/* Mobile Left Toggle */}
-          <Sheet>
-            <SheetTrigger asChild>
-              <Button variant="ghost" size="icon" title="Toggle Sidebar" className="lg:hidden">
-                <PanelLeft className="h-5 w-5" />
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="left" className="p-0 w-80 sm:w-96 flex flex-col">
-              <aside className="h-full p-4 bg-sidebar border-r border-border flex flex-col overflow-hidden">
-                {sidebar}
-              </aside>
-            </SheetContent>
-          </Sheet>
-
-          {/* Desktop Left Toggle */}
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            title={isLeftCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
-            className="hidden lg:flex"
-            onClick={toggleLeftPanel}
-          >
-            <PanelLeft className={`h-5 w-5 ${isLeftCollapsed ? 'opacity-50' : ''}`} />
-          </Button>
-        </div>
-
-        <div className="hidden lg:block font-semibold px-2">
-          {/* Placeholder for breadcrumbs or title if needed */}
-        </div>
-
-        <div className="flex items-center gap-2">
-          {/* Desktop Right Toggle */}
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            title={isRightCollapsed ? "Expand AI Chat" : "Collapse AI Chat"}
-            className="hidden lg:flex"
-            onClick={toggleRightPanel}
-          >
-            <MessageSquare className={`h-5 w-5 ${isRightCollapsed ? 'opacity-50' : ''}`} />
-          </Button>
-
-          {/* Mobile Right Toggle */}
-          <Sheet>
-            <SheetTrigger asChild>
-              <Button variant="ghost" size="icon" title="Toggle AI Chat" className="lg:hidden">
-                <MessageSquare className="h-5 w-5" />
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="right" className="p-0 w-80 sm:w-96 flex flex-col pt-10">
-              <aside className="h-full p-4 bg-sidebar border-l border-border flex flex-col overflow-hidden">
-                {aiPanel}
-              </aside>
-            </SheetContent>
-          </Sheet>
-        </div>
-      </div>
+    <div className="h-screen w-full flex flex-col rounded-lg border bg-background text-foreground overflow-hidden">
       
       {/* Main content area managed by ResizablePanelGroup */}
       <ResizablePanelGroup
         direction="horizontal"
-        className="flex-1 w-full"
+        className="flex-1 w-full h-full"
       >
         {/* Left Sidebar (Desktop) */}
-        {/* defaultSize={0} makes it start collapsed (hidden) on desktop */}
         <ResizablePanel 
           ref={leftPanelRef}
           defaultSize={0} 
@@ -118,9 +64,21 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ sidebar, mainContent,
           maxSize={25} 
           onCollapse={() => setIsLeftCollapsed(true)}
           onExpand={() => setIsLeftCollapsed(false)}
-          className="hidden lg:block"
+          className="hidden lg:block relative group"
         >
-          <aside className="h-full p-4 bg-sidebar border-r border-border flex flex-col overflow-hidden">
+          <aside className="h-full p-4 bg-sidebar border-r border-border flex flex-col overflow-hidden relative">
+            {/* Collapse Button (Inside Sidebar) */}
+            <div className="absolute top-2 right-2 z-20 opacity-0 group-hover:opacity-100 transition-opacity">
+               <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-6 w-6" 
+                onClick={toggleLeftPanel}
+                title="Collapse Sidebar"
+              >
+                <PanelLeftClose className="h-4 w-4 text-muted-foreground" />
+              </Button>
+            </div>
             {sidebar}
           </aside>
         </ResizablePanel>
@@ -128,7 +86,64 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ sidebar, mainContent,
         <ResizableHandle withHandle className="hidden lg:flex" />
 
         {/* Central Content */}
-        <ResizablePanel defaultSize={75} minSize={40}>
+        <ResizablePanel defaultSize={75} minSize={40} className="relative flex flex-col">
+          
+          {/* Left Expand/Toggle Button (Floating) */}
+          <div className={`absolute top-3 left-3 z-50 flex gap-2 transition-all duration-300 ${!isLeftCollapsed ? 'lg:hidden' : ''}`}>
+             {/* Mobile Sheet Trigger */}
+            <Sheet>
+              <SheetTrigger asChild>
+                <Button variant="outline" size="icon" className="h-8 w-8 lg:hidden bg-background/80 backdrop-blur-sm shadow-sm" title="Open Menu">
+                  <PanelLeft className="h-4 w-4" />
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="left" className="p-0 w-80 sm:w-96 flex flex-col">
+                <aside className="h-full p-4 bg-sidebar border-r border-border flex flex-col overflow-hidden">
+                  {sidebar}
+                </aside>
+              </SheetContent>
+            </Sheet>
+
+            {/* Desktop Expand Button */}
+            <Button 
+              variant="outline" 
+              size="icon" 
+              className={`h-8 w-8 hidden lg:flex bg-background/80 backdrop-blur-sm shadow-sm`}
+              onClick={toggleLeftPanel}
+              title="Expand Sidebar"
+            >
+              <PanelLeft className="h-4 w-4" />
+            </Button>
+          </div>
+
+          {/* Right Expand/Toggle Button (Floating) */}
+          <div className={`absolute top-3 right-3 z-50 flex gap-2 transition-all duration-300 ${!isRightCollapsed ? 'lg:hidden' : ''}`}>
+             {/* Desktop Expand Button */}
+             <Button 
+              variant="outline" 
+              size="icon" 
+              className={`h-8 w-8 hidden lg:flex bg-background/80 backdrop-blur-sm shadow-sm`}
+              onClick={toggleRightPanel}
+              title="Expand AI Chat"
+            >
+              <MessageSquare className="h-4 w-4" />
+            </Button>
+
+            {/* Mobile Sheet Trigger */}
+            <Sheet>
+              <SheetTrigger asChild>
+                <Button variant="outline" size="icon" className="h-8 w-8 lg:hidden bg-background/80 backdrop-blur-sm shadow-sm" title="Open AI Chat">
+                  <MessageSquare className="h-4 w-4" />
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="right" className="p-0 w-80 sm:w-96 flex flex-col pt-10">
+                <aside className="h-full p-4 bg-sidebar border-l border-border flex flex-col overflow-hidden">
+                  {aiPanel}
+                </aside>
+              </SheetContent>
+            </Sheet>
+          </div>
+
           <main className="h-full p-4 overflow-y-auto bg-background">
             {mainContent}
           </main>
@@ -137,7 +152,6 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ sidebar, mainContent,
         <ResizableHandle withHandle className="hidden lg:flex" />
 
         {/* Right Sidebar (AI Panel) (Desktop) */}
-        {/* defaultSize={25} makes it start expanded on desktop */}
         <ResizablePanel 
           ref={rightPanelRef}
           defaultSize={25} 
@@ -147,9 +161,21 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ sidebar, mainContent,
           maxSize={35} 
           onCollapse={() => setIsRightCollapsed(true)}
           onExpand={() => setIsRightCollapsed(false)}
-          className="hidden lg:block"
+          className="hidden lg:block relative group"
         >
-          <aside className="h-full p-4 bg-sidebar border-l border-border flex flex-col">
+          <aside className="h-full p-4 bg-sidebar border-l border-border flex flex-col relative">
+             {/* Collapse Button (Inside Sidebar) */}
+             <div className="absolute top-2 left-2 z-20 opacity-0 group-hover:opacity-100 transition-opacity">
+               <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-6 w-6" 
+                onClick={toggleRightPanel}
+                title="Collapse AI Chat"
+              >
+                <PanelRightClose className="h-4 w-4 text-muted-foreground" />
+              </Button>
+            </div>
             {aiPanel}
           </aside>
         </ResizablePanel>
