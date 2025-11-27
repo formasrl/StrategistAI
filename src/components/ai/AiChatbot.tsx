@@ -98,6 +98,28 @@ type TimelineEntry =
   | { kind: 'message'; timestamp: string; data: ChatMessage }
   | { kind: 'review'; timestamp: string; data: AiReview };
 
+// Helper function to extract JSON content from message
+const extractInsertContent = (content: string): { displayContent: string; insertContent?: string } => {
+  // More robust regex that allows for whitespace/newlines around the JSON block
+  const jsonBlockMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
+  
+  if (jsonBlockMatch && jsonBlockMatch[1]) {
+    try {
+      const parsed = JSON.parse(jsonBlockMatch[1]);
+      if (typeof parsed.insert_content === 'string') {
+        return {
+          insertContent: parsed.insert_content,
+          displayContent: content.replace(jsonBlockMatch[0], '').trim()
+        };
+      }
+    } catch (e) {
+      console.error('Failed to parse JSON block in chat message:', e);
+    }
+  }
+  
+  return { displayContent: content };
+};
+
 const AiChatbot: React.FC<AiChatbotProps> = ({
   projectId,
   phaseId,
@@ -173,22 +195,8 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
     }
 
     return messagesData.map((msg: any) => {
-      let insertContent: string | undefined;
-      let displayContent = msg.content || '';
-
-      // Extract ```json { "insert_content": "..." } ``` block if present
-      const jsonBlockMatch = displayContent.match(/```json\s*([\s\S]*?)```/);
-      if (jsonBlockMatch && jsonBlockMatch[1]) {
-        try {
-          const parsed = JSON.parse(jsonBlockMatch[1]);
-          if (typeof parsed.insert_content === 'string') {
-            insertContent = parsed.insert_content;
-            displayContent = displayContent.replace(jsonBlockMatch[0], '').trim();
-          }
-        } catch {
-          // ignore parsing failures
-        }
-      }
+      const rawContent = msg.content || '';
+      const { displayContent, insertContent } = extractInsertContent(rawContent);
 
       let fileNames: string[] = [];
       const fileMatch = displayContent.match(/\(Files?: ([^)]+)\)/);
@@ -354,21 +362,7 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
           setMessages((prev) => {
             if (prev.some((m) => m.id === newMsg.id)) return prev;
 
-            let insertContent: string | undefined;
-            let displayContent = newMsg.content;
-
-            const jsonBlockMatch = displayContent.match(/```json\s*([\s\S]*?)```/);
-            if (jsonBlockMatch && jsonBlockMatch[1]) {
-              try {
-                const parsed = JSON.parse(jsonBlockMatch[1]);
-                if (typeof parsed.insert_content === 'string') {
-                  insertContent = parsed.insert_content;
-                  displayContent = displayContent.replace(jsonBlockMatch[0], '').trim();
-                }
-              } catch {
-                // ignore
-              }
-            }
+            const { displayContent, insertContent } = extractInsertContent(newMsg.content || '');
 
             let fileNames: string[] = [];
             const fileMatch = displayContent.match(/\(Files?: ([^)]+)\)/);
@@ -481,12 +475,19 @@ const AiChatbot: React.FC<AiChatbotProps> = ({
         {
           id: crypto.randomUUID(),
           sender: 'ai',
-          text: data.reply,
+          text: data.reply, // AI message from backend might contain the JSON block too
           timestamp: new Date().toISOString(),
           sources: data.sources,
-          insertContent: data.insertContent,
+          insertContent: data.insertContent, // Backend parsed it?
         },
       ]);
+      
+      // Even if backend returns insertContent, we double check in the renderer via extractInsertContent 
+      // for consistency if data.reply still has the block.
+      // Actually, fetchMessagesForSession handles re-parsing from DB.
+      // For the immediate local update, if `data.insertContent` is set by backend, we use it.
+      // If not, the component will re-render when `postgres_changes` fires (which calls the extract logic).
+      
     } catch (err: any) {
       console.error('Chat Error:', err);
       showError('Failed to get response. Please try again.');
