@@ -1,4 +1,5 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   ResizableHandle,
   ResizablePanel,
@@ -20,11 +21,18 @@ interface DashboardLayoutProps {
 }
 
 const DashboardLayout: React.FC<DashboardLayoutProps> = ({ sidebar, mainContent, aiPanel }) => {
-  // Only ref for Right Panel is needed now as Left is an overlay (Sheet)
   const rightPanelRef = useRef<ImperativePanelHandle>(null);
+  const location = useLocation();
   
   // Right defaults to expanded (false means not collapsed)
   const [isRightCollapsed, setIsRightCollapsed] = useState(false);
+  // Left Sidebar state (Controlled)
+  const [isLeftOpen, setIsLeftOpen] = useState(false);
+
+  // Automatically close the left sidebar when the route changes
+  useEffect(() => {
+    setIsLeftOpen(false);
+  }, [location.pathname]);
 
   const toggleRightPanel = () => {
     const panel = rightPanelRef.current;
@@ -42,17 +50,12 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ sidebar, mainContent,
         direction="horizontal"
         className="flex-1 w-full h-full"
       >
-        {/* 
-          LEFT SIDEBAR REMOVED from ResizablePanelGroup.
-          It is now handled purely by the floating Sheet trigger below.
-        */}
-
         {/* Central Content */}
         <ResizablePanel defaultSize={75} minSize={40} className="relative flex flex-col">
           
           {/* Left Toggle Button (Floating) - Always visible, triggers Overlay */}
           <div className="absolute top-3 left-3 z-50 flex gap-2">
-            <Sheet>
+            <Sheet open={isLeftOpen} onOpenChange={setIsLeftOpen}>
               <SheetTrigger asChild>
                 <Button variant="outline" size="icon" className="h-8 w-8 bg-background/80 backdrop-blur-sm shadow-sm" title="Open Menu">
                   <PanelLeft className="h-4 w-4" />

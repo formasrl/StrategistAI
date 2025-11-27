@@ -6,7 +6,7 @@ import { showError } from '@/utils/toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
-import { Lightbulb, Loader2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Lightbulb, Loader2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Target } from 'lucide-react';
 import DocumentEditor from './DocumentEditor';
 import { saveLastActiveStep } from '@/utils/localStorage';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -251,6 +251,8 @@ const StepWorkspace: React.FC = () => {
     
   const displayGoal = step.description || staticGuidance?.description || "No goal defined.";
   const displayWhyMatters = step.why_matters || staticGuidance?.why_matters || "No context provided.";
+  // FIX: Fetch Expected Output from DB first, then fallback to static library
+  const displayExpectedOutput = step.expected_output || staticGuidance?.expected_output || "No expected output defined.";
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -311,6 +313,15 @@ const StepWorkspace: React.FC = () => {
                     <h3 className="font-semibold text-foreground mb-1">Why it matters:</h3>
                     <p>{displayWhyMatters}</p>
                   </div>
+                </div>
+                
+                {/* New Section: Expected Output */}
+                <div className="bg-secondary/20 p-3 rounded-md border border-secondary/30">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Target className="h-4 w-4 text-primary" />
+                    <h3 className="font-semibold text-foreground">Expected Output:</h3>
+                  </div>
+                  <p className="text-foreground/90 font-medium">{displayExpectedOutput}</p>
                 </div>
                 
                 <div>
