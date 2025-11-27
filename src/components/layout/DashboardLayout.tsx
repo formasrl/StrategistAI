@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   ResizableHandle,
   ResizablePanel,
@@ -18,11 +18,15 @@ interface DashboardLayoutProps {
 const DashboardLayout: React.FC<DashboardLayoutProps> = ({ sidebar, mainContent, aiPanel }) => {
   const leftPanelRef = useRef<ImperativePanelHandle>(null);
   const rightPanelRef = useRef<ImperativePanelHandle>(null);
+  
+  // Track collapsed state locally since the ref method might not be available or reliable
+  const [isLeftCollapsed, setIsLeftCollapsed] = useState(true); // Start collapsed (defaultSize=0)
+  const [isRightCollapsed, setIsRightCollapsed] = useState(false); // Start expanded (defaultSize=25)
 
   const toggleLeftPanel = () => {
     const panel = leftPanelRef.current;
     if (panel) {
-      if (panel.getCollapsed()) panel.expand();
+      if (isLeftCollapsed) panel.expand();
       else panel.collapse();
     }
   };
@@ -30,7 +34,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ sidebar, mainContent,
   const toggleRightPanel = () => {
     const panel = rightPanelRef.current;
     if (panel) {
-      if (panel.getCollapsed()) panel.expand();
+      if (isRightCollapsed) panel.expand();
       else panel.collapse();
     }
   };
@@ -58,11 +62,11 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ sidebar, mainContent,
           <Button 
             variant="ghost" 
             size="icon" 
-            title="Toggle Sidebar" 
+            title={isLeftCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
             className="hidden lg:flex"
             onClick={toggleLeftPanel}
           >
-            <PanelLeft className="h-5 w-5" />
+            <PanelLeft className={`h-5 w-5 ${isLeftCollapsed ? 'opacity-50' : ''}`} />
           </Button>
         </div>
 
@@ -75,11 +79,11 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ sidebar, mainContent,
           <Button 
             variant="ghost" 
             size="icon" 
-            title="Toggle AI Chat" 
+            title={isRightCollapsed ? "Expand AI Chat" : "Collapse AI Chat"}
             className="hidden lg:flex"
             onClick={toggleRightPanel}
           >
-            <MessageSquare className="h-5 w-5" />
+            <MessageSquare className={`h-5 w-5 ${isRightCollapsed ? 'opacity-50' : ''}`} />
           </Button>
 
           {/* Mobile Right Toggle */}
@@ -112,6 +116,8 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ sidebar, mainContent,
           collapsible={true}
           minSize={15} 
           maxSize={25} 
+          onCollapse={() => setIsLeftCollapsed(true)}
+          onExpand={() => setIsLeftCollapsed(false)}
           className="hidden lg:block"
         >
           <aside className="h-full p-4 bg-sidebar border-r border-border flex flex-col overflow-hidden">
@@ -139,6 +145,8 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ sidebar, mainContent,
           collapsible={true}
           minSize={20} 
           maxSize={35} 
+          onCollapse={() => setIsRightCollapsed(true)}
+          onExpand={() => setIsRightCollapsed(false)}
           className="hidden lg:block"
         >
           <aside className="h-full p-4 bg-sidebar border-l border-border flex flex-col">
