@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import EditProjectDialog from '@/components/projects/EditProjectDialog'; // Import the new dialog
 import { formatDateTime } from '@/utils/dateUtils'; // New import
+import { clearLastActiveStep } from '@/utils/localStorage';
 
 // Define context type to include refreshProjects
 type ProjectDetailsContext = {
@@ -43,11 +44,12 @@ const ProjectDetails: React.FC = () => {
     }
 
     setIsLoading(true);
+    // Changed .single() to .maybeSingle() to avoid errors when project is deleted/not found
     const { data, error } = await supabase
       .from('projects')
       .select('*')
       .eq('id', projectId)
-      .single();
+      .maybeSingle();
 
     if (error) {
       showError(`Failed to load project details: ${error.message}`);
@@ -75,6 +77,8 @@ const ProjectDetails: React.FC = () => {
       showError(`Failed to delete project: ${error.message}`);
     } else {
       showSuccess('Project deleted successfully!');
+      // Clear local storage so dashboard doesn't try to redirect back to this deleted project
+      clearLastActiveStep();
       // Trigger sidebar refresh
       refreshProjects?.();
       navigate('/dashboard');
