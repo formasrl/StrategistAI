@@ -8,13 +8,13 @@ import NotFound from "./pages/NotFound";
 import Login from "./pages/Login";
 import ProjectCreation from "./pages/ProjectCreation";
 import Dashboard from "./pages/Dashboard";
+import DashboardHome from "./pages/DashboardHome"; // Import the new homepage
 import ProjectDetails from "./pages/ProjectDetails";
-import DocumentEditor from "./pages/DocumentEditor";
 import UserSettings from "./pages/UserSettings";
 import Profile from "./pages/Profile";
 import StepWorkspace from "./pages/StepWorkspace";
 import AdminMigration from "./pages/AdminMigration";
-import AdminSplitMigration from "./pages/AdminSplitMigration"; // New import
+import AdminSplitMigration from "./pages/AdminSplitMigration";
 import { SessionContextProvider } from "./integrations/supabase/SessionContextProvider";
 import { ThemeProvider } from "next-themes";
 import AppSetupProvider from "./components/layout/AppSetupProvider";
@@ -39,17 +39,10 @@ const App = () => (
                 <Route path="/admin/split-migration" element={<AdminSplitMigration />} />
                 
                 <Route path="/dashboard" element={<Dashboard />}>
-                  <Route index element={
-                    <div className="flex flex-col items-center justify-center h-full">
-                      <h1 className="text-3xl font-bold mb-4">Welcome to your Dashboard!</h1>
-                      <p className="text-lg text-muted-foreground">
-                        Select a project from the sidebar to view its details.
-                      </p>
-                    </div>
-                  } />
+                  {/* Use DashboardHome for the index route */}
+                  <Route index element={<DashboardHome />} />
                   <Route path=":projectId" element={<ProjectDetails />} />
                   <Route path=":projectId/step/:stepId" element={<StepWorkspace />} />
-                  {/* Point document route to StepWorkspace to show guidance header */}
                   <Route path=":projectId/document/:documentId" element={<StepWorkspace />} />
                   <Route path="settings" element={<UserSettings />} />
                   <Route path="profile" element={<Profile />} />
