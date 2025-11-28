@@ -61,19 +61,32 @@ const Dashboard = () => {
       const isDashboardRoot = location.pathname === '/dashboard' || location.pathname === '/dashboard/';
 
       if (isDashboardRoot && !projectId && !stepId && !documentId) {
-        const lastActive = getLastActiveStep();
-        if (lastActive) {
-          if (lastActive.documentId) {
-            navigate(`/dashboard/${lastActive.projectId}/document/${lastActive.documentId}`);
-          } else if (lastActive.stepId) {
-            navigate(`/dashboard/${lastActive.projectId}/step/${lastActive.stepId}`);
-          } else if (lastActive.projectId) {
-            navigate(`/dashboard/${lastActive.projectId}`);
-          }
-          return;
-        }
+        const checkLastActiveAndRedirect = async () => {
+          const lastActive = getLastActiveStep();
+          if (lastActive) {
+            // VERIFY IF PROJECT EXISTS BEFORE REDIRECTING
+            const { data: projectData } = await supabase
+              .from('projects')
+              .select('id')
+              .eq('id', lastActive.projectId)
+              .maybeSingle();
 
-        const checkProjects = async () => {
+            if (projectData) {
+              if (lastActive.documentId) {
+                navigate(`/dashboard/${lastActive.projectId}/document/${lastActive.documentId}`);
+              } else if (lastActive.stepId) {
+                navigate(`/dashboard/${lastActive.projectId}/step/${lastActive.stepId}`);
+              } else if (lastActive.projectId) {
+                navigate(`/dashboard/${lastActive.projectId}`);
+              }
+              return;
+            } else {
+              // Project stored in local storage no longer exists
+              clearLastActiveStep();
+            }
+          }
+
+          // If no valid last active project, check if ANY projects exist
           const { data, error } = await supabase
             .from('projects')
             .select('id')
@@ -85,7 +98,7 @@ const Dashboard = () => {
           }
         };
 
-        checkProjects();
+        checkLastActiveAndRedirect();
       }
     }
   }, [session, isLoading, navigate, projectId, stepId, documentId, location.pathname]);

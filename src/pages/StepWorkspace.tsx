@@ -49,13 +49,17 @@ const StepWorkspace: React.FC = () => {
           .from('documents')
           .select('step_id')
           .eq('id', paramDocumentId)
-          .single();
+          .maybeSingle(); // Changed to maybeSingle for safety
 
         if (docError) {
+          console.error("Error resolving document context:", docError);
           showError(`Failed to resolve document context: ${docError.message}`);
           setResolvedStepId(undefined);
-        } else if (docData.step_id) {
+        } else if (docData?.step_id) {
           setResolvedStepId(docData.step_id);
+        } else {
+           // Document might not exist or has no step_id
+           setResolvedStepId(undefined);
         }
       } 
       else if (paramStepId) {
@@ -97,9 +101,10 @@ const StepWorkspace: React.FC = () => {
         .from('steps')
         .select('*, phases(id, phase_name, phase_number)')
         .eq('id', resolvedStepId)
-        .single();
+        .maybeSingle(); // Changed to maybeSingle for safety
 
       if (error) {
+        console.error("Error loading step details:", error);
         showError(`Failed to load step details: ${error.message}`);
         setStep(null);
       } else {
